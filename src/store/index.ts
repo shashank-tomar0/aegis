@@ -34,7 +34,7 @@ interface AppState {
   // UI State
   mode: 'select' | 'pan' | 'blast' | 'path' | 'crypto';
   sidebarOpen: boolean;
-  sidebarTab: 'details' | 'analytics' | 'crypto' | 'threats' | 'settings';
+  sidebarTab: import('../components/panels/Sidebar').SidebarTabId;
   commandPaletteOpen: boolean;
   commandPaletteQuery: string;
 
@@ -145,7 +145,7 @@ export const useStore = create<AppState>()(
         panStart: null,
         mode: 'select',
         sidebarOpen: true,
-        sidebarTab: 'details',
+        sidebarTab: 'topology',
         commandPaletteOpen: false,
         commandPaletteQuery: '',
         isSimulating: false,

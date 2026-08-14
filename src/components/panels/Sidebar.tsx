@@ -4,19 +4,26 @@
 import React, { useState } from 'react';
 import { useStore, selectSidebar, selectMode, selectSimulation, selectGraph, selectViewport } from '../../store';
 import { NodeDetailPanel } from './NodeDetailPanel';
+import { TopologyPanel } from './TopologyPanel';
 import { AnalyticsPanel } from './AnalyticsPanel';
 import { CryptoPanel } from './CryptoPanel';
 import { ThreatsPanel } from './ThreatsPanel';
+import { EventLogPanel } from './EventLogPanel';
 import { SettingsPanel } from './SettingsPanel';
-import { ChevronLeft, ChevronRight, Cpu, Network, Database, Activity, Lock, Shield, Settings, Play, Pause, RotateCcw, Maximize, Minimize, Zap, Download } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Cpu, Network, Database, Activity, Lock, Shield, Settings, Play, Pause, RotateCcw, Maximize, Minimize, Zap, Download, Terminal } from 'lucide-react';
 
 const TABS = [
+  { id: 'topology', label: 'TOPOLOGY', icon: Network },
   { id: 'details', label: 'DETAILS', icon: Cpu },
+  { id: 'events', label: 'EVENTS', icon: Terminal },
   { id: 'analytics', label: 'ANALYTICS', icon: Activity },
   { id: 'crypto', label: 'CRYPTO', icon: Lock },
   { id: 'threats', label: 'THREATS', icon: Shield },
   { id: 'settings', label: 'SETTINGS', icon: Settings },
 ] as const;
+
+// Export for store type references
+export type SidebarTabId = (typeof TABS)[number]['id'];
 
 export const Sidebar: React.FC = () => {
   const { open, tab } = useStore(selectSidebar);
@@ -42,12 +49,14 @@ export const Sidebar: React.FC = () => {
   // Render active panel
   const renderPanel = () => {
     switch (tab) {
+      case 'topology': return <TopologyPanel />;
       case 'details': return <NodeDetailPanel />;
+      case 'events': return <EventLogPanel />;
       case 'analytics': return <AnalyticsPanel />;
       case 'crypto': return <CryptoPanel />;
       case 'threats': return <ThreatsPanel />;
       case 'settings': return <SettingsPanel />;
-      default: return <NodeDetailPanel />;
+      default: return <TopologyPanel />;
     }
   };
 

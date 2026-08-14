@@ -147,11 +147,16 @@ export const App: React.FC = () => {
     if (!useStore.getState().isSimulating) return;
 
     const interval = setInterval(() => {
-      useStore.getState().stepSimulation();
+      const state = useStore.getState();
+      if (!state.isSimulating) {
+        clearInterval(interval);
+        return;
+      }
+      state.stepSimulation();
     }, 1000 / useStore.getState().simulationSpeed);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [useStore.getState().isSimulating]);
 
   return (
     <div className="h-screen w-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg)' }}>
