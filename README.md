@@ -1,32 +1,77 @@
-# React + TypeScript + Vite
+# AEGIS — Agentic Attack Surface + PQC Crypto-Agility
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Zero-slop attack surface intelligence for agentic AI systems. Map agents, tools, and data flows, compute real blast radius, and manage post-quantum cryptographic migration — all with real algorithms, in the browser.
 
-Currently, two official plugins are available:
+## Core Capabilities
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+### Graph Engine (`src/engine/graph.ts`)
+Real algorithms, no simulation fakes:
+- **Blast Radius** — max-flow/min-cut (Edmonds-Karp), risk propagation with hop decay, time-to-compromise, critical path enumeration
+- **Centrality** — Brandes betweenness centrality (O(VE))
+- **Force Layout** — Fruchterman-Reingold with clamping, quarantine pinning
+- **Crypto Profiles** — per-node algorithm, key size, quantum resistance, NIST level, migration target/priority, cert metadata
+- **History** — snapshot-based undo stack
 
-## React Compiler
+### Analytics Engine (`src/engine/analytics.ts`)
+Real DuckDB-WASM in the browser:
+- Nodes/edges/events tables with indexes
+- Prepared queries: top risk, crypto inventory, migration plan, recursive CTE attack paths, blast radius summary, centrality outliers, severity distribution
+- Append-only event buffer with batched flush
+- Arrow IPC + Parquet export
+- Custom SQL in the UI
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### ZK Proof Engine (`src/engine/zkproof.ts`)
+Privacy-preserving threat intel:
+- Pedersen-style commitments (WebCrypto SHA-256/HMAC)
+- Merkle tree batching with membership proofs
+- Nullifier set for double-submission prevention
+- Zero-knowledge key rotation proofs
 
-## Expanding the Oxlint configuration
+### UI
+- Canvas graph rendering (DPR-aware, 60fps, hit-testing, zoom/pan)
+- Panels: **Topology** inventory, **Node Details**, **Event Log**, **Analytics** (SQL), **Crypto** (PQC migration queue), **Threats** (ZK intel), **Settings**
+- Command palette (Ctrl+K) with fuzzy search
+- Full keyboard shortcuts
+- Dark terminal aesthetic, JetBrains Mono
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+## Quick Start
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev        # http://localhost:5174
+npm run build      # tsc -b && vite build
+npm run preview
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `Space` | Start/stop simulation |
+| `F` | Zoom to fit |
+| `Z` | Recalculate centrality |
+| `B` / `P` / `C` | Blast / path / crypto mode |
+| `V` / `H` | Select / pan mode |
+| `S` | Step simulation |
+| `A` / `T` / `D` / `G` | Add agent / tool / data / gateway |
+| `E` | Connect selected nodes |
+| `Ctrl+K` | Command palette |
+| `Ctrl+S` | Save session |
+| `Ctrl+N` | New session |
+| `Ctrl+Z` | Undo |
+| `Esc` | Deselect |
+
+## Architecture
+
+```
+src/
+├── engine/          # Pure logic (graph, analytics, zkproof, rng)
+├── store/           # Zustand state + persistence
+├── components/
+│   ├── graph/       # Canvas rendering
+│   ├── panels/      # Sidebar panels
+│   └── ui/          # Command palette
+└── types/           # Domain types (branded IDs, enums)
+```
+
+The engine layer is fully dependency-free and testable in Node (`npx tsx`).
