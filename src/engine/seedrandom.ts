@@ -70,4 +70,4 @@ export class SeededRNG {
 }
 
 // Global simulation RNG instance
-export const simRNG = new SeededRNG(0xAEG15C0DE);
+export const simRNG = new SeededRNG(2916983006);
