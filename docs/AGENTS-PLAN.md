@@ -1,6 +1,6 @@
 # AEGIS agents — The Local Agent Console (design + plan)
 
-> Status: **P0 shipped**. P1 partial (agent detection + Ollama probe). P2–P3 designed, not built.
+> Status: **P0–P3 shipped**. Local-first agent inspection AND evaluation, live in the terminal.
 
 ## Problem (why this exists)
 
@@ -24,8 +24,8 @@ evalon-compatible evaluation layer.
 aegis agents                  # interactive TUI (this repo)
 aegis agents --json           # machine-readable snapshot for CI/scripts
 aegis agents --once           # one-shot text table
-aegis agents traces           # (P2) browse evalon traces from ~/.evalon/*.sqlite
-aegis eval run '{"prompt":…}' # (P3) deterministic + rubric scoring, versioned datasets
+aegis traces [evalon-db]      # browser evalon runs (traces/spans/metrics)
+aegis eval init|run|list|compare|export|datasets   # evaluation harness
 ```
 
 ## P0 — Live inventory (shipped)
@@ -42,36 +42,36 @@ aegis eval run '{"prompt":…}' # (P3) deterministic + rubric scoring, versioned
   `+/-` poll interval, `k` kill-with-confirm, `e` export JSON, `q` quit.
 - Zero dependencies; works in any modern terminal; no server, no keys.
 
-## P1 — Agent intelligence layer (partially shipped)
+## P1 — Agent intelligence layer (shipped)
 
-- [x] Agent-stack registry + classification (shipped)
-- [x] Ollama probe — shows loaded models from `http://localhost:11434/api/tags` when running (shipped)
-- [ ] Docker containers-as-agents (docker CLI, when present)
-- [ ] Per-agent CPU/mem sparkline (sampled over time)
-- [ ] Children/parent tree view + "spawned by" chains (pstree-style)
-- [ ] Anomaly rules: sustained high CPU, many children, new binaries in temp dirs
+- [x] Agent-stack registry + classification
+- [x] Ollama probe — loaded models from `http://localhost:11434/api/tags` when running
+- [x] Docker containers-as-agents (`docker ps` merged into the inventory, absent → noted)
+- [x] Per-agent **live CPU %** (delta of total CPU between polls) + memory bars
+- [x] **Tree view** (`t`): parent → children preorder, pstree-style
+- [x] Anomaly rules: `★` new-since-last-scan, `cpu ~N%`, `N children`, plus the
+      secret/credential argument flags
 
-## P2 — Evalon integration (designed)
+## P2 — Evalon integration (shipped)
 
-Our Node ≥ 24 ships `node:sqlite` — we read **Evalon's** `~/.evalon/evalon-runs.sqlite`
-directly, no Python required on this side:
+Our Node ≥ 24 ships `node:sqlite` — `aegis traces [db]` reads **Evalon's**
+`~/.evalon/evalon-runs.sqlite` (or any path) directly, no Python required:
 
-- `aegis agents traces` → pick app → show trace tree, per-span LLM cost/latency/tokens,
-  expected-vs-actual, errors; rerun evaluation for a project
-- `aegis agents --evalon <db-path>` → device view + traces side by side
-- Match by process: e.g. a Python agent process whose evalon traces exist → "open traces" in the detail pane
+- projects → traces → per-span view (kind, latency, error), metrics (cost, tokens),
+  expected-vs-actual, events; `--json`/`--once`/`--errors`/`--project` flags
+- schema sourced from the evalon repo (traces/spans/events/metrics/sessions) —
 
 **Why this is the right move:** Evalon solved the hard Python instrumentation problem.
-We don't re-solve it; we make it visible in the terminal everyone already uses, and we
-mirror its API idioms in our Node eval layer.
+We don't re-solve it; we render it in the terminal everyone already uses.
 
-## P3 — `aegis eval` (designed, mirrors evalon)
+## P3 — `aegis eval` (shipped, mirrors evalon)
 
-- Deterministic checks (exact/contains/regex vs `expected`) + rubric scores (1–5 criteria)
-  for any output file/JSONL, stored versioned in SQLite
-- `aegis eval run <file|jsonl> --schema ...` → scores + failures; `aegis eval compare <a> <b>`
-- JSONL ingestion so any agent (Python/Node/CLI) can feed runs without source edits
-  (`aegis eval ingest --app my-app`)
+- Deterministic checks: `exact` / `contains` / `regex` (with `(?i)` shim + `negate`)
+- Rubric checks: aggregates per-criterion scores (1–5) provided by your judge per record
+- Versioned runs in SQLite (`~/.aegis/eval.db`): `init · run <file.jsonl> --app <name>
+  --config eval.config.json · list · compare <app> [--v1/--v2] · export · datasets`
+- `datasets` reads an evalon evals db (datasets/versions/cases/runs) read-only
+- Any agent can feed runs as JSONL — no source edits required
 
 ## Principles (why this is "real", not a toy)
 

@@ -67,12 +67,15 @@ Privacy-preserving threat intel (client-side):
 aegis agents          # live terminal console: every process w/ agent detection
 aegis agents --json   # machine-readable snapshot (CI / scripts)
 aegis agents --once   # one-shot table
+aegis traces [db]     # browse Evalon run databases (no Python needed)
+aegis eval run out.jsonl --app name --config eval.config.json   # evaluation harness
 ```
 
 Keyboard-driven, zero dependencies: detail pane per process (command line, path, parent,
-CPU, memory, threads, handles), sort/filter, kill-with-confirm, JSON export. Recognizes
+CPU, memory, threads, handles), tree view (`t`), live CPU% sampling, new-process/children
+anomalies, docker containers, sort/filter, kill-with-confirm, JSON export. Recognizes
 agent stacks (ollama, claude, cursor, codex, aider, goose, uvicorn…) and flags secret-like
-arguments. Full design: `docs/AGENTS-PLAN.md`.
+arguments. Tested against real evalon SQLite fixtures. Full design: `docs/AGENTS-PLAN.md`.
 
 ## Quick Start
 

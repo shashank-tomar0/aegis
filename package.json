@@ -5,7 +5,9 @@
   "type": "module",
   "bin": {
     "aegis": "./scripts/aegis.mjs",
-    "aegis-agents": "./scripts/aegis-agents.mjs"
+    "aegis-agents": "./scripts/aegis-agents.mjs",
+    "aegis-agent-traces": "./scripts/aegis-agent-traces.mjs",
+    "aegis-eval": "./scripts/aegis-eval.mjs"
   },
   "scripts": {
     "dev": "vite",

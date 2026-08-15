@@ -38,7 +38,7 @@ async function loadProcesses() {
   for (const p of JSON.parse(perfRaw || '[]')) {
     if (p && p.Id != null) perf.set(Number(p.Id), p);
   }
-  return cim.map((p) => {
+  const procs = cim.map((p) => {
     const id = Number(p.ProcessId);
     const g = perf.get(id) || {};
     const name = String(p.Name || g.ProcessName || '').replace(/\.exe$/i, '');
@@ -59,6 +59,38 @@ async function loadProcesses() {
       handles: Number(g.Handles) || 0,
     };
   }).filter((p) => p.pid > 0);
+
+  // docker containers merged in as agent/tool rows (best effort; absent → skip)
+  try {
+    const { stdout } = await new Promise((resolve, reject) => {
+      execFile('docker', ['ps', '--no-trunc', '--format', '{{json .}}'], { timeout: 10000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, so) => (err ? reject(err) : resolve({ stdout: so })));
+    });
+    dockerNote = null;
+    stdout.split(/\r?\n/).filter(Boolean).forEach((line, i) => {
+      let c = null;
+      try { c = JSON.parse(line); } catch { return; }
+      const name = String(c.Names || c.name || `ctr-${i}`).split(',')[0];
+      const img = String(c.Image || '');
+      procs.push({
+        pid: dockerBase + i,
+        docker: true,
+        name: name.toLowerCase(),
+        label: name.toUpperCase().slice(0, 30),
+        cmd: `${name} → ${c.Command ?? ''}`.slice(0, 300),
+        path: img,
+        parent: null,
+        session: 'docker',
+        started: null,
+        startedText: String(c.Status || '').slice(0, 20),
+        cpuSec: 0, wsBytes: 0, pmBytes: 0, threads: 0, handles: 0,
+        image: img,
+        networks: String(c.Networks || '').split(',').map((s) => s.trim()).filter(Boolean),
+      });
+    });
+  } catch {
+    dockerNote = 'docker CLI not available — containers skipped';
+  }
+  return procs;
 }
 
 // ------------------------------------------------------------ agent detection
@@ -95,7 +127,10 @@ const FLAG_PATTERNS = [
 function classify(p) {
   const name = p.name, cmd = p.cmd.toLowerCase();
   let cls = 'unknown', reason = 'no matches';
-  if (AGENT_NAMES.has(name)) {
+  if (p.docker) {
+    cls = /agent|worker|bot|runner/i.test(name) ? 'agent' : 'tool';
+    reason = `docker container (${p.image ?? '?'})`;
+  } else if (AGENT_NAMES.has(name)) {
     cls = 'agent'; reason = `recognized agent stack (${name})`;
   } else if (AGENT_HINTS.some((h) => cmd.includes(h))) {
     cls = 'agent'; reason = 'agent markers in command line';
@@ -106,10 +141,40 @@ function classify(p) {
   }
   const flags = [];
   for (const [re, label] of FLAG_PATTERNS) if (re.test(cmd)) flags.push(label);
+  // anomaly flags (labeled heuristics, from real sampling)
+  if (p.isNew) flags.push('new since last scan');
+  if (p.cpuPct > 40) flags.push(`cpu ~${Math.round(p.cpuPct)}%`);
+  if (p.childrenCount >= 5) flags.push(`${p.childrenCount} children`);
   return { cls, reason, flags };
 }
 
 const CLS_ORDER = { agent: 0, tool: 1, system: 2, unknown: 3 };
+
+// sample CPU % (delta of total CPU time between polls), mark new processes,
+// count children — real signals, labeled heuristics
+function augment(list) {
+  const now = Date.now();
+  const childCounts = new Map();
+  for (const p of list) if (p.parent != null) childCounts.set(p.parent, (childCounts.get(p.parent) ?? 0) + 1);
+  for (const p of list) {
+    p.childrenCount = childCounts.get(p.pid) ?? 0;
+    const prev = samples.get(p.pid);
+    if (prev && now > prev.t) {
+      const dtSec = (now - prev.t) / 1000;
+      const dCpu = p.cpuSec - prev.cpu;
+      p.cpuPct = Math.max(0, (dCpu / Math.max(dtSec, 0.1)) * 100);
+    } else {
+      p.cpuPct = 0;
+    }
+    // only flag "new" once we have a real baseline (2nd+ refresh)
+    p.isNew = prevPids.size > 0 && !prevPids.has(p.pid);
+    samples.set(p.pid, { t: now, cpu: p.cpuSec, ws: p.wsBytes });
+  }
+  const alive = new Set(list.map((p) => p.pid));
+  for (const k of samples.keys()) if (!alive.has(k)) samples.delete(k);
+  if (samples.size > 4000) samples.clear();
+  prevPids = alive;
+}
 
 // --------------------------------------------------------------- helpers
 const humanBytes = (b) => {
@@ -139,6 +204,12 @@ let lastLoad = 0;
 let loading = true;
 let maxWs = 1;
 let inputMode = null; // 'filter' | 'kill'
+let samples = new Map(); // pid -> {t, cpu, ws}
+let prevPids = new Set();
+let treeMode = false;
+let indents = [];
+let dockerNote = null;
+const dockerBase = 9_000_000;
 let inputBuf = '';
 let ollama = null;
 
@@ -148,13 +219,38 @@ function rebuild() {
     const f = filter.toLowerCase();
     list = list.filter((p) => p.label.toLowerCase().includes(f) || p.cmd.toLowerCase().includes(f) || String(p.pid).includes(f));
   }
-  const keyFn = {
-    ws: (p) => p.wsBytes, cpu: (p) => p.cpuSec, pid: (p) => p.pid, name: (p) => p.label,
-    cls: (p) => CLS_ORDER[classify(p).cls],
-  }[sortKey] ?? ((p) => p.wsBytes);
-  list.sort((a, b) => (sortKey === 'name' || sortKey === 'cls' ? String(keyFn(a)).localeCompare(String(keyFn(b))) : keyFn(b) - keyFn(a)));
-  // stable agent-first for name sort default? keep simple: default sort ws
-  rows = list;
+  indents = [];
+  if (treeMode) {
+    // parent-child tree (preorder, children by ws desc)
+    const byParent = new Map();
+    for (const p of list) {
+      const k = p.parent ?? 'root';
+      if (!byParent.has(k)) byParent.set(k, []);
+      byParent.get(k).push(p);
+    }
+    for (const arr of byParent.values()) arr.sort((a, b) => b.wsBytes - a.wsBytes);
+    const roots = list.filter((p) => !list.some((x) => x.pid === p.parent));
+    const flat = [];
+    const walk = (node, depth, isLast, prefix) => {
+      const branch = depth === 0 ? '' : (isLast ? '└─ ' : '├─ ');
+      flat.push(node);
+      indents.push(prefix + branch);
+      const kids = (byParent.get(node.pid) ?? []).filter((k) => k !== node);
+      const childPrefix = prefix + (depth === 0 ? '' : (isLast ? '   ' : '│  '));
+      kids.forEach((kid, i) => walk(kid, depth + 1, i === kids.length - 1, childPrefix, true));
+    };
+    roots.sort((a, b) => b.wsBytes - a.wsBytes);
+    roots.forEach((r, i) => walk(r, 0, i === roots.length - 1, '', true));
+    rows = flat.filter(Boolean);
+  } else {
+    const keyFn = {
+      ws: (p) => p.wsBytes, cpu: (p) => p.cpuSec, pid: (p) => p.pid, name: (p) => p.label,
+      cls: (p) => CLS_ORDER[classify(p).cls],
+    }[sortKey] ?? ((p) => p.wsBytes);
+    list.sort((a, b) => (sortKey === 'name' || sortKey === 'cls' ? String(keyFn(a)).localeCompare(String(keyFn(b))) : keyFn(b) - keyFn(a)));
+    rows = list;
+    indents = rows.map(() => '');
+  }
   if (sel >= rows.length) sel = Math.max(0, rows.length - 1);
   usage = processes.reduce(
     (acc, p) => {
@@ -173,6 +269,7 @@ async function refresh(mode) {
   loading = true; draw();
   try {
     const list = await loadProcesses();
+    augment(list);
     processes = list;
     lastLoad = Date.now();
     loading = false;
@@ -249,9 +346,11 @@ function render() {
     const clsC = cls === 'agent' ? hue.green : cls === 'tool' ? hue.cyan : cls === 'system' ? hue.gray : hue.dim;
     const memBar = Math.min(8, Math.round((p.wsBytes / maxWs) * 8));
     const bar = '█'.repeat(memBar) + '░'.repeat(8 - memBar);
+    const indent = indents[idx] ?? '';
+    const st = p.docker ? (p.startedText || '?') : (p.started ? p.started.toLocaleTimeString() : '?');
     const line =
       ` ${String(p.pid).padEnd(5)} ${col(clsC, cls.padEnd(5))} ${humanBytes(p.wsBytes).padEnd(9)} ${humanSec(p.cpuSec).padEnd(8)} ${String(p.threads).padEnd(4)}` +
-      ` ${p.label.slice(0, 22).padEnd(22)} ${(p.started ? p.started.toLocaleTimeString() : '? ').padEnd(9)} ${String(p.parent ?? '').padEnd(7)}` +
+      `${indent}${p.isNew ? col(hue.yellow, '★') : ' '} ${p.label.slice(0, Math.max(6, 22 - indent.length)).padEnd(22)} ${st.padEnd(9)} ${String(p.parent ?? '').padEnd(7)}` +
       `${flags.length ? col(hue.red, '⚠') : ' '} ${bar}`;
     const padded = line.length < tableW ? line + ' '.repeat(tableW - line.length) : line.slice(0, tableW);
     if (selRow) out.push(C.inv + padded.slice(0, tableW) + C.reset);
@@ -267,7 +366,7 @@ function render() {
   } else {
     out[listH + headerH + 0] = `${col(hue.dim, message)}${' '.repeat(Math.max(1, tableW - message.length - 10))}${col(hue.gray, `row ${sel + 1}/${rows.length}`)}`;
   }
-  out[listH + headerH + 1] = col(hue.dim, ` ${ollama ? `OLLAMA: ${ollama.models.map((m) => m.name).join(', ')}` : ' agent profile: '}${rows[sel] ? `${rows[sel].label} → ${classify(rows[sel]).reason}${classify(rows[sel]).flags.length ? ' · ' + classify(rows[sel]).flags.join(' · ') : ''}` : ''}`.slice(0, tableW));
+  out[listH + headerH + 1] = col(hue.dim, ` ${ollama ? `OLLAMA: ${ollama.models.map((m) => m.name).join(', ')}` : ' agent profile: '}${rows[sel] ? `${rows[sel].label} → ${classify(rows[sel]).reason}${classify(rows[sel]).flags.length ? ' · ' + classify(rows[sel]).flags.join(' · ') : ''}` : ''}${dockerNote ? ` · ${dockerNote}` : ''} · ${treeMode ? 'TREE' : 'FLAT'}`.slice(0, tableW));
 
   if (detailOn && rows[sel]) {
     const p = rows[sel];
@@ -283,6 +382,7 @@ function render() {
       `${col(hue.dim, 'cpu     ')} ${humanSec(p.cpuSec)} total`,
       `${col(hue.dim, 'mem     ')} ${humanBytes(p.wsBytes)} ws · ${humanBytes(p.pmBytes)} pm`,
       `${col(hue.dim, 'threads ')} ${p.threads} · ${col(hue.dim, 'handles ')} ${p.handles}`,
+      `${p.cpuPct != null ? `${col(hue.dim, 'cpu~    ')} ${p.cpuPct.toFixed(0)}% live` : ''}${p.docker ? ` ${col(hue.dim, '· docker')} ${(p.networks ?? []).join(',')}` : ''}`,
       '',
       `${col(hue.dim, 'path    ')} ${p.path || '—'}`.slice(0, paneW - 2),
       '',
@@ -339,6 +439,7 @@ function keypress(buf) {
     case '3': sortKey = 'pid'; message = 'sorted by pid'; rebuild(); draw(); break;
     case '4': sortKey = 'name'; message = 'sorted by name'; rebuild(); draw(); break;
     case '5': sortKey = 'cls'; message = 'sorted by class'; rebuild(); draw(); break;
+    case 't': treeMode = !treeMode; message = treeMode ? 'tree view (parent → children)' : 'flat view'; sel = 0; rebuild(); draw(); break;
     case 'f': inputMode = 'filter'; inputBuf = filter; draw(); break;
     case 'd': case '\r': case '\n': detailOn = !detailOn; draw(); break;
     case 'r': refresh(); break;
@@ -366,7 +467,7 @@ const snapshot = (list) => list.map((p) => ({ ...p, started: p.started ? p.start
 
 if (FLAG_JSON) {
   loadProcesses()
-    .then((list) => process.stdout.write(JSON.stringify(snapshot(list), null, 2)))
+    .then((list) => { augment(list); process.stdout.write(JSON.stringify(snapshot(list), null, 2)); })
     .catch((err) => { console.error(err.message); process.exit(1); });
 } else if (FLAG_ONCE) {
   loadProcesses()

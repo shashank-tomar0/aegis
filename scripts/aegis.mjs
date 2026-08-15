@@ -42,6 +42,15 @@ async function api(cfg, method, path, body) {
 
 const fmt = (n) => n.toLocaleString('en-US');
 
+async function runChild(script, rest) {
+  const { spawn } = await import('node:child_process');
+  const { dirname, join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const here = dirname(fileURLToPath(import.meta.url));
+  const child = spawn(process.execPath, [join(here, script), ...rest], { stdio: 'inherit' });
+  child.on('exit', (code) => process.exit(code ?? 1));
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const cfg = loadConfig();
@@ -60,6 +69,9 @@ async function main() {
     console.log(`  aegis schedule <projectId> <collector> <minutes|off>`);
     console.log(`  aegis report <projectId> [--out report.md]`);
     console.log(`  aegis watch <projectId>`);
+    console.log(`  aegis agents [--json|--once]   agent console TUI`);
+    console.log(`  aegis traces [evalon-runs.sqlite]   evalon trace browser`);
+    console.log(`  aegis eval init|run|list|compare|export|datasets`);
     return;
   }
 
@@ -201,13 +213,15 @@ async function main() {
       break;
     }
     case 'agents': {
-      // hand off to the interactive agent-console TUI
-      const { spawn } = await import('node:child_process');
-      const { dirname, join } = await import('node:path');
-      const { fileURLToPath } = await import('node:url');
-      const here = dirname(fileURLToPath(import.meta.url));
-      const child = spawn(process.execPath, [join(here, 'aegis-agents.mjs'), ...rest], { stdio: 'inherit' });
-      child.on('exit', (code) => process.exit(code ?? 1));
+      await runChild('aegis-agents.mjs', rest);
+      return;
+    }
+    case 'eval': {
+      await runChild('aegis-eval.mjs', rest);
+      return;
+    }
+    case 'traces': case 'agent-traces': {
+      await runChild('aegis-agent-traces.mjs', rest);
       return;
     }
     case 'watch': {
