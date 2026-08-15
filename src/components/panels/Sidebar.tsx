@@ -2,7 +2,7 @@
 // Zero-slop, dense information architecture
 
 import React, { useState } from 'react';
-import { useStore, selectSidebar, selectMode, selectSimulation, selectGraph, selectViewport } from '../../store';
+import { useStore, selectSidebarOpen, selectSidebarTab, selectMode, selectSimulationRunning, selectSimulationSpeed, selectSimulationTime, selectGraph, selectViewport } from '../../store';
 import { NodeDetailPanel } from './NodeDetailPanel';
 import { TopologyPanel } from './TopologyPanel';
 import { AnalyticsPanel } from './AnalyticsPanel';
@@ -28,9 +28,12 @@ const TABS = [
 export type SidebarTabId = (typeof TABS)[number]['id'];
 
 export const Sidebar: React.FC = () => {
-  const { open, tab } = useStore(selectSidebar);
+  const open = useStore(selectSidebarOpen);
+  const tab = useStore(selectSidebarTab);
   const mode = useStore(selectMode);
-  const simulation = useStore(selectSimulation);
+  const simulationIsRunning = useStore(selectSimulationRunning);
+  const simulationSpeed = useStore(selectSimulationSpeed);
+  const simulationTime = useStore(selectSimulationTime);
   const graph = useStore(selectGraph);
   const viewport = useStore(selectViewport);
   const toggleSidebar = useStore(state => state.toggleSidebar);
@@ -125,21 +128,21 @@ export const Sidebar: React.FC = () => {
           <div className="p-3 space-y-2 border-b border-neutral-700">
             <div className="flex items-center justify-between">
               <span className="text-neutral-500 text-xs uppercase tracking-wider">SIMULATION</span>
-              <span className={`badge ${simulation.isRunning ? 'badge-accent' : 'badge-neutral'} text-[9px]`}>
-                {simulation.isRunning ? 'RUNNING' : 'PAUSED'}
+              <span className={`badge ${simulationIsRunning ? 'badge-accent' : 'badge-neutral'} text-[9px]`}>
+                {simulationIsRunning ? 'RUNNING' : 'PAUSED'}
               </span>
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={simulation.isRunning ? stopSimulation : startSimulation}
-                className={`btn ${simulation.isRunning ? 'btn-danger' : 'btn-primary'} flex-1 justify-center py-1.5`}
+                onClick={simulationIsRunning ? stopSimulation : startSimulation}
+                className={`btn ${simulationIsRunning ? 'btn-danger' : 'btn-primary'} flex-1 justify-center py-1.5`}
               >
-                {simulation.isRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                <span className="ml-1">{simulation.isRunning ? 'STOP' : 'START'}</span>
+                {simulationIsRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                <span className="ml-1">{simulationIsRunning ? 'STOP' : 'START'}</span>
               </button>
               <button
                 onClick={stepSimulation}
-                disabled={simulation.isRunning}
+                disabled={simulationIsRunning}
                 className="btn btn-secondary py-1.5"
                 title="Step"
               >
@@ -149,18 +152,18 @@ export const Sidebar: React.FC = () => {
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-neutral-500">SPEED</span>
-                <span className="text-neutral-300 font-mono">{simulation.speed.toFixed(1)}x</span>
+                <span className="text-neutral-300 font-mono">{simulationSpeed.toFixed(1)}x</span>
               </div>
               <input
                 type="range"
                 min="0.1"
                 max="5"
                 step="0.1"
-                value={simulation.speed}
+                value={simulationSpeed}
                 onChange={e => setSimulationSpeed(parseFloat(e.target.value))}
                 className="w-full h-1 bg-neutral-800 appearance-none rounded accent-accent"
               />
-              <div className="text-neutral-500 text-xs">Time: {simulation.time}</div>
+              <div className="text-neutral-500 text-xs">Time: {simulationTime}</div>
             </div>
           </div>
         )}

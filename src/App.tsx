@@ -174,6 +174,17 @@ export const App: React.FC = () => {
             <Network className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => { window.location.href = '/'; }}
+              className="btn btn-ghost p-1.5 mr-1"
+              aria-label="Back to landing page"
+              title="Landing"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                <path d="M8 1.2 13.5 3v4.8c0 3.6-2 6-5.5 7.2-3.5-1.2-5.5-3.6-5.5-7.2V3L8 1.2Z" stroke="currentColor" strokeWidth="1.2" />
+                <path d="M5 8.2h6M8 5.6v5.2" stroke="currentColor" strokeWidth="1.2" />
+              </svg>
+            </button>
             <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--color-accent)' }}>
               <Zap className="w-5 h-5" style={{ color: 'var(--color-bg)' }} />
             </div>

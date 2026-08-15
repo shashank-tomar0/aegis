@@ -2,7 +2,7 @@
 // Zero-slop, compliance-focused cryptographic inventory
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { useStore, selectGraph, selectCrypto } from '../../store';
+import { useStore, selectGraph, selectCryptoQueue, selectCryptoMigrating } from '../../store';
 import { analyticsEngine } from '../../engine/analytics';
 import type { CryptoAlgorithm, CryptoProfile, QuantumResistance, NodeId } from '../../types';
 import { CryptoAlgorithm as CA, QuantumResistance as QR, RiskSeverity as RS, NodeKind as NK } from '../../types';
@@ -40,7 +40,8 @@ const QR_LABEL: Record<QuantumResistance, string> = {
 
 export const CryptoPanel: React.FC = () => {
   const graph = useStore(selectGraph);
-  const { queue, isMigrating } = useStore(selectCrypto);
+  const queue = useStore(selectCryptoQueue);
+  const isMigrating = useStore(selectCryptoMigrating);
   const setCryptoProfile = useStore(state => state.setCryptoProfile);
   const queueCryptoMigration = useStore(state => state.queueCryptoMigration);
   const processCryptoMigrations = useStore(state => state.processCryptoMigrations);

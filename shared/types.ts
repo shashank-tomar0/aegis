@@ -15,6 +15,7 @@ export interface PqcSignResult {
   signatureB64: string;
   signatureBytes: number;
   messageHash: string;
+  publicKeyB64: string;
   verified: boolean;
 }
 

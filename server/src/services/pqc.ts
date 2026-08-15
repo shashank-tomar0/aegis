@@ -99,8 +99,22 @@ export function signMessage(message: string, algorithm = 'ML-DSA-65'): PqcSignRe
     signatureB64: b64(sig),
     signatureBytes: sig.length,
     messageHash: createHash('sha256').update(msg).digest('hex'),
+    publicKeyB64: b64(kp.publicKey),
     verified,
   };
+}
+
+// Independently verify a PQC signature against a supplied public key
+export function verifyMessage(message: string, signatureB64: string, publicKeyB64: string, algorithm = 'ML-DSA-65'): { algorithm: string; verified: boolean } {
+  const def = ALGORITHMS[algorithm];
+  if (!def || def.klass !== 'dsa') throw new Error(`Not a signature algorithm: ${algorithm}`);
+
+  const msg = Buffer.from(message, 'utf-8');
+  const sig = Uint8Array.from(Buffer.from(signatureB64, 'base64'));
+  const pk = Uint8Array.from(Buffer.from(publicKeyB64, 'base64'));
+  const verified = def.impl.verify(sig, msg, pk);
+
+  return { algorithm: def.name, verified };
 }
 
 // KEM: encapsulate a shared secret to a PQC public key

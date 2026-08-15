@@ -45,8 +45,10 @@ Privacy-preserving threat intel (client-side):
 - Pedersen-style commitments (WebCrypto SHA-256/HMAC), Merkle tree batching, nullifier set, zero-knowledge key rotation proofs
 
 ### UI
-- Canvas graph rendering (DPR-aware, hit-testing, zoom/pan), command palette (Ctrl+K), full keyboard shortcuts, dark terminal aesthetic
+- **Landing page** (`/`) — Instrument Serif display type over a live hero graph running the real engine (force layout, click-for-blast-radius), an embedded PQC terminal driven by the real API, a capability grid of live computations, and an SSE-fed telemetry strip. Ctrl+K command palette on the landing too.
+- Canvas graph rendering (DPR-aware, hit-testing, zoom/pan), command palette (Cmd/Ctrl+K), full keyboard shortcuts, dark terminal aesthetic
 - Panels: **Topology**, **Node Details**, **Event Log**, **Analytics**, **Crypto**, **Threats**, **Server** (connection status, sessions, PQC playground, remote DuckDB query), **Settings**
+- Routing: `/` landing, `/console` app (lazy-loaded) — hash-free via History API
 
 ## Quick Start
 

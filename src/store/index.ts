@@ -738,18 +738,18 @@ export const selectSelectedNodes = (state: AppState) => state.selectedNodes;
 export const selectSelectedEdges = (state: AppState) => state.selectedEdges;
 export const selectViewport = (state: AppState) => state.viewport;
 export const selectMode = (state: AppState) => state.mode;
-export const selectSidebar = (state: AppState) => ({ open: state.sidebarOpen, tab: state.sidebarTab });
-export const selectSimulation = (state: AppState) => ({
-  isRunning: state.isSimulating,
-  speed: state.simulationSpeed,
-  time: state.simulationTime,
-});
+// NOTE: React 19.2's useSyncExternalStore requires selector results to be
+// referentially stable — object/array literals in selectors cause an infinite
+// forceStoreRerender loop. Always select primitives (or use useShallow).
+export const selectSidebarOpen = (state: AppState) => state.sidebarOpen;
+export const selectSidebarTab = (state: AppState) => state.sidebarTab;
+export const selectSimulationRunning = (state: AppState) => state.isSimulating;
+export const selectSimulationSpeed = (state: AppState) => state.simulationSpeed;
+export const selectSimulationTime = (state: AppState) => state.simulationTime;
 export const selectEvents = (state: AppState) => state.eventLog;
 export const selectAnalytics = (state: AppState) => state.analyticsResults;
-export const selectCrypto = (state: AppState) => ({
-  queue: state.cryptoMigrationQueue,
-  isMigrating: state.isMigrating,
-});
+export const selectCryptoQueue = (state: AppState) => state.cryptoMigrationQueue;
+export const selectCryptoMigrating = (state: AppState) => state.isMigrating;
 export const selectThreats = (state: AppState) => state.threatIntel;
 export const selectCommandPaletteOpen = (state: AppState) => state.commandPaletteOpen;
 export const selectCommandPaletteQuery = (state: AppState) => state.commandPaletteQuery;
