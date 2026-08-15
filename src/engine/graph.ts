@@ -470,7 +470,75 @@ export class AttackSurfaceGraph {
     return QuantumResistance.NONE;
   }
 
-  // Serialization
+  // Load an externally-discovered graph (collector output) into this instance,
+// preserving source ids so edges resolve. Positions are seeded from the id so
+// the layout starts deterministic instead of random.
+  loadExternal(
+    nodes: Array<{ id: string; kind: NodeKind; label: string; metadata?: Record<string, unknown>; riskScore?: number; severity?: number }>,
+    edges: Array<{ id: string; source: string; target: string; kind: EdgeKind; weight?: number; metadata?: Record<string, unknown> }>,
+  ): void {
+    this.nodes = new Map();
+    this.edges = new Map();
+    this.adjacency = new Map();
+    this.reverseAdjacency = new Map();
+    this.history = [];
+
+    for (const n of nodes) {
+      if (!n.id || !n.label) continue;
+      // seed from id so layouts are stable across loads
+      let seed = 0;
+      for (const ch of n.id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+      const position = {
+        x: 120 + (seed % 900),
+        y: 120 + ((seed >> 8) % 500),
+      };
+      const node: GraphNode = {
+        id: n.id as NodeId,
+        kind: n.kind,
+        label: n.label,
+        metadata: n.metadata ?? {},
+        position,
+        velocity: { vx: 0, vy: 0 },
+        riskScore: n.riskScore ?? 0,
+        severity: (n.severity as RiskSeverity) ?? RiskSeverity.INFO,
+        isCompromised: false,
+        isQuarantined: false,
+        blastRadius: 0,
+        centrality: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      this.nodes.set(node.id, node);
+      this.adjacency.set(node.id, new Set());
+      this.reverseAdjacency.set(node.id, new Set());
+    }
+
+    for (const e of edges) {
+      if (!e.id || !this.nodes.has(e.source as NodeId) || !this.nodes.has(e.target as NodeId)) continue;
+      const edge: GraphEdge = {
+        id: e.id as EdgeId,
+        source: e.source as NodeId,
+        target: e.target as NodeId,
+        kind: e.kind,
+        weight: e.weight ?? 1,
+        metadata: e.metadata ?? {},
+        isActive: true,
+        riskContribution: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      this.edges.set(edge.id, edge);
+      this.adjacency.get(edge.source)!.add(edge.id);
+      this.reverseAdjacency.get(edge.target)!.add(edge.id);
+    }
+
+    this.nodeCounter = this.nodes.size;
+    this.edgeCounter = this.edges.size;
+    this.stepLayout(20);
+    this.saveSnapshot();
+  }
+
+// Serialization
   toJSON(): object {
     return {
       nodes: Array.from(this.nodes.entries()),

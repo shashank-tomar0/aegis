@@ -128,3 +128,48 @@ export const API_ENDPOINTS = {
   nodes: '/api/nodes',
   query: '/api/query',
 } as const;
+
+// ---- Accounts, workspaces, discovery (product layer) ----
+export interface AuthUser { id: string; email: string; }
+
+export interface ProjectCounts { nodes: number; edges: number; events: number; }
+
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  counts: ProjectCounts;
+  meta: Record<string, unknown>;
+}
+
+export interface ApiKeyInfo {
+  id: string;
+  name: string;
+  prefix: string;
+  createdAt: number;
+  lastUsed: number | null;
+  revoked: boolean;
+}
+
+export interface CollectorInfo {
+  name: string;
+  description: string;
+  simulated: boolean;
+  available: boolean;
+  note?: string;
+  running: boolean;
+  lastRun: { at: number; found: number; error: string | null; simulated: boolean; ms: number } | null;
+}
+
+export interface CollectorRunResponse {
+  collector: string;
+  simulated: boolean;
+  available: boolean;
+  note?: string;
+  found: number;
+  upserted: { nodes: number; edges: number } | null;
+  ms: number;
+  counts: ProjectCounts;
+  log: string[];
+}

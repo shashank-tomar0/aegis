@@ -18,7 +18,7 @@ import { analyticsEngine } from '../engine/analytics';
 import { zkThreatIntel, zkKeyRotation } from '../engine/zkproof';
 import { simRNG } from '../engine/seedrandom';
 import { api, probeServer } from '../lib/api';
-import type { ServerStatus, SessionSnapshot } from '../../shared/types';
+import type { ServerStatus, SessionSnapshot, ProjectInfo, ApiKeyInfo, CollectorInfo } from '../../shared/types';
 
 interface AppState {
   // Graph
@@ -64,6 +64,17 @@ interface AppState {
   serverSession: SessionSnapshot | null;
   serverSessions: SessionSnapshot[];
   isSyncingServer: boolean;
+
+  // Accounts, workspaces & discovery (product layer)
+  authUser: { id: string; email: string } | null;
+  authBusy: boolean;
+  authError: string | null;
+  projects: ProjectInfo[];
+  currentProjectId: string | null;
+  apiKeys: ApiKeyInfo[];
+  collectors: CollectorInfo[];
+  collectorLog: string[];
+  discoveryBusy: boolean;
 
   // Actions - Graph
   addNode: (kind: NodeKind, label: string, metadata?: Record<string, unknown>, position?: Position) => NodeId;
@@ -136,6 +147,25 @@ interface AppState {
   syncGraphToServer: () => Promise<boolean>;
   pushEventToServer: (type: string, source: string, severity?: number, payload?: unknown) => Promise<void>;
 
+  // Actions - Accounts / workspaces / discovery
+  refreshAuth: () => Promise<void>;
+  register: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  refreshProjects: () => Promise<void>;
+  createProject: (name: string) => Promise<ProjectInfo | null>;
+  deleteProject: (id: string) => Promise<void>;
+  selectProject: (id: string | null) => void;
+  refreshCollectors: () => Promise<void>;
+  runCollector: (collector: string) => Promise<boolean>;
+  refreshApiKeys: () => Promise<void>;
+  createApiKey: (name: string) => Promise<string | null>;
+  revokeApiKey: (id: string) => Promise<void>;
+  loadDiscoveredGraph: (projectId?: string) => Promise<boolean>;
+  clearProjectGraph: () => Promise<void>;
+  appendCollectorLog: (line: string) => void;
+  clearCollectorLog: () => void;
+
   // Actions - Persistence
   saveSession: () => Promise<void>;
   loadSession: (sessionData: any) => void;
@@ -179,6 +209,17 @@ export const useStore = create<AppState>()(
         serverSession: null,
         serverSessions: [],
         isSyncingServer: false,
+
+        // Accounts / workspaces / discovery
+        authUser: null,
+        authBusy: false,
+        authError: null,
+        projects: [],
+        currentProjectId: null,
+        apiKeys: [],
+        collectors: [],
+        collectorLog: [],
+        discoveryBusy: false,
 
         // Graph Actions
         addNode: (kind, label, metadata = {}, position) => {
@@ -658,6 +699,147 @@ export const useStore = create<AppState>()(
             console.error('[Server] push event failed:', err);
           }
         },
+
+        // ---- Accounts / workspaces / discovery ----
+        refreshAuth: async () => {
+          try {
+            const { user } = await api.authMe();
+            set({ authUser: user });
+          } catch { set({ authUser: null }); }
+        },
+        register: async (email, password) => {
+          set({ authBusy: true, authError: null });
+          try {
+            const { user } = await api.authRegister(email, password);
+            set({ authUser: user, authBusy: false });
+            return true;
+          } catch (err) {
+            set({ authBusy: false, authError: err instanceof Error ? err.message : String(err) });
+            return false;
+          }
+        },
+        login: async (email, password) => {
+          set({ authBusy: true, authError: null });
+          try {
+            const { user } = await api.authLogin(email, password);
+            set({ authUser: user, authBusy: false });
+            return true;
+          } catch (err) {
+            set({ authBusy: false, authError: err instanceof Error ? err.message : String(err) });
+            return false;
+          }
+        },
+        logout: async () => {
+          try { await api.authLogout(); } catch { /* ignore */ }
+          set({ authUser: null, projects: [], currentProjectId: null, apiKeys: [], collectors: [] });
+        },
+        refreshProjects: async () => {
+          try {
+            const projects = await api.listProjects();
+            set({ projects });
+            if (!get().currentProjectId && projects.length > 0) {
+              set({ currentProjectId: projects[0].id });
+            }
+          } catch { set({ projects: [] }); }
+        },
+        createProject: async (name) => {
+          try {
+            const project = await api.createProject(name);
+            set(s => ({ projects: [project, ...s.projects.filter(p => p.id !== project.id)], currentProjectId: project.id }));
+            return project;
+          } catch (err) {
+            set({ authError: err instanceof Error ? err.message : String(err) });
+            return null;
+          }
+        },
+        deleteProject: async (id) => {
+          try {
+            await api.deleteProject(id);
+            set(s => {
+              const projects = s.projects.filter(p => p.id !== id);
+              return { projects, currentProjectId: s.currentProjectId === id ? (projects[0]?.id ?? null) : s.currentProjectId };
+            });
+          } catch { /* ignore */ }
+        },
+        selectProject: (id) => set({ currentProjectId: id }),
+        refreshCollectors: async () => {
+          try { set({ collectors: await api.listCollectors() }); }
+          catch { set({ collectors: [] }); }
+        },
+        runCollector: async (collector) => {
+          const projectId = get().currentProjectId;
+          if (!projectId) { set({ authError: 'select a project first' }); return false; }
+          set({ discoveryBusy: true, authError: null });
+          get().appendCollectorLog(`> running "${collector}" into ${projectId.slice(0, 8)}…`);
+          try {
+            const r = await api.runCollector(collector, projectId);
+            get().appendCollectorLog(r.available
+              ? `✓ ${collector}: ${r.found} items · ${r.upserted?.nodes ?? 0} nodes / ${r.upserted?.edges ?? 0} edges · ${r.ms}ms${r.simulated ? ' · SIMULATED' : ''}`
+              : `✗ ${collector}: ${r.note ?? 'unavailable'}`);
+            for (const line of (r.log ?? [])) get().appendCollectorLog(`  ${line}`);
+            await get().refreshProjects();
+            await get().refreshCollectors();
+            return r.available;
+          } catch (err) {
+            get().appendCollectorLog(`✗ ${err instanceof Error ? err.message : String(err)}`);
+            return false;
+          } finally {
+            set({ discoveryBusy: false });
+          }
+        },
+        refreshApiKeys: async () => {
+          try { set({ apiKeys: await api.listApiKeys() }); }
+          catch { set({ apiKeys: [] }); }
+        },
+        createApiKey: async (name) => {
+          try {
+            const k = await api.createApiKey(name);
+            await get().refreshApiKeys();
+            return k.key;
+          } catch (err) {
+            set({ authError: err instanceof Error ? err.message : String(err) });
+            return null;
+          }
+        },
+        revokeApiKey: async (id) => {
+          try { await api.revokeApiKey(id); await get().refreshApiKeys(); } catch { /* ignore */ }
+        },
+        loadDiscoveredGraph: async (projectId) => {
+          const id = projectId ?? get().currentProjectId;
+          if (!id) { set({ authError: 'select a project first' }); return false; }
+          try {
+            const { nodes, edges } = await api.getProjectGraph(id);
+            if (nodes.length === 0) { get().appendCollectorLog('⚠ project graph is empty — run a collector first'); return false; }
+            // DuckDB rows use snake_case column names — map to engine shape
+            const mappedNodes = nodes.map((n: any) => ({
+              id: n.id, kind: n.kind, label: n.label,
+              metadata: n.metadata ?? {}, riskScore: n.risk_score ?? 0, severity: n.severity ?? 0,
+            }));
+            const mappedEdges = edges.map((e: any) => ({
+              id: e.id, source: e.source_id, target: e.target_id,
+              kind: e.kind, weight: e.weight ?? 1, metadata: e.metadata ?? {},
+            }));
+            const graph = new AttackSurfaceGraph();
+            graph.loadExternal(mappedNodes as any, mappedEdges as any);
+            set({ graph, selectedNodes: new Set(), selectedEdges: new Set() });
+            get().appendCollectorLog(`✓ loaded ${nodes.length} nodes / ${edges.length} edges into the canvas`);
+            return true;
+          } catch (err) {
+            get().appendCollectorLog(`✗ ${err instanceof Error ? err.message : String(err)}`);
+            return false;
+          }
+        },
+        clearProjectGraph: async () => {
+          const projectId = get().currentProjectId;
+          if (!projectId) return;
+          try {
+            await api.clearProjectGraph(projectId);
+            await get().refreshProjects();
+            get().appendCollectorLog('✓ project graph cleared on server');
+          } catch { /* ignore */ }
+        },
+        appendCollectorLog: (line) => set(s => ({ collectorLog: [...s.collectorLog.slice(-60), line] })),
+        clearCollectorLog: () => set({ collectorLog: [] }),
 
         // Persistence Actions
         saveSession: async () => {

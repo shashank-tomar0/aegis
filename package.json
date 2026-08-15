@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "aegis": "./scripts/aegis.mjs"
+  },
   "scripts": {
     "dev": "vite",
     "dev:server": "tsx watch server/src/index.ts",

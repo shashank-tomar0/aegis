@@ -4,6 +4,11 @@
 import type { GraphNode, GraphEdge, AnalyticsQuery } from '../types';
 import * as duckdb from '@duckdb/duckdb-wasm';
 import { tableToIPC } from 'apache-arrow';
+// Same-origin DuckDB-WASM bundle — no CDN worker URLs, so the analytics
+// worker works on plain http(s) deploys (CDN workers are blocked as
+// cross-origin in many contexts).
+import mvpWasm from '@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url';
+import mvpWorker from '@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url';
 
 export interface AnalyticsEvent {
   timestamp: number;
@@ -34,15 +39,11 @@ export class AnalyticsEngine {
 
   private async _initialize(): Promise<void> {
     try {
-      // Get DuckDB WASM bundle
-      const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
-      const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
-
-      // Create worker
-      const worker = new Worker(bundle.mainWorker!);
+      // Local, same-origin bundle (single-threaded MVP flavour)
+      const worker = new Worker(mvpWorker);
       const logger = new duckdb.ConsoleLogger();
       this.db = new duckdb.AsyncDuckDB(logger, worker);
-      await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+      await this.db.instantiate(mvpWasm, undefined as never);
 
       // Create connection
       this.conn = await this.db.connect();

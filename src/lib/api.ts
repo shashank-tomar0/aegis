@@ -2,9 +2,9 @@
 // Zero-slop fetch wrapper with auto-JSON, error typing, and retry
 
 import type {
-  ApiHealth, CertificateSigningRequest, IssuedCertificate, PqcCapsuleResult,
-  PqcKeyPairResult, PqcSignResult, QueryResult, ServerStatus, SessionSnapshot,
-  ThreatIntelRecord,
+  ApiHealth, ApiKeyInfo, AuthUser, CertificateSigningRequest, CollectorInfo, CollectorRunResponse,
+  IssuedCertificate, PqcCapsuleResult, PqcKeyPairResult, PqcSignResult, ProjectInfo,
+  QueryResult, ServerStatus, SessionSnapshot, ThreatIntelRecord,
 } from '../../shared/types';
 
 export const SERVER_HOST = import.meta.env.VITE_AEGIS_SERVER ?? 'http://localhost:8787';
@@ -24,6 +24,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const url = `${SERVER_HOST}${path}`;
   const res = await fetch(url, {
     ...init,
+    // session cookies must travel with the request even when the UI is served
+    // from a different origin than the API (e.g. vite dev on :5173 vs :8787)
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(init.headers ?? {}),
@@ -85,6 +88,37 @@ export const api = {
   listThreats: () => request<ThreatIntelRecord[]>('/api/threats'),
   addThreat: (intel: ThreatIntelRecord) =>
     request<ThreatIntelRecord>('/api/threats', { method: 'POST', body: JSON.stringify(intel) }),
+
+  // ---- Accounts & sessions (cookie-authenticated in the browser) ----
+  authRegister: (email: string, password: string) =>
+    request<{ user: AuthUser; token: string }>('/api/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  authLogin: (email: string, password: string) =>
+    request<{ user: AuthUser; token: string }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  authLogout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
+  authMe: () => request<{ user: AuthUser | null }>('/api/auth/me'),
+
+  // ---- Projects (workspaces) ----
+  listProjects: () => request<ProjectInfo[]>('/api/projects'),
+  createProject: (name: string) =>
+    request<ProjectInfo>('/api/projects', { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteProject: (id: string) =>
+    request<{ ok: boolean }>(`/api/projects/${id}`, { method: 'DELETE' }),
+  getProjectGraph: (id: string) =>
+    request<{ projectId: string; nodes: any[]; edges: any[] }>(`/api/projects/${id}/graph`),
+  clearProjectGraph: (id: string) =>
+    request<{ ok: boolean }>(`/api/projects/${id}/graph`, { method: 'DELETE' }),
+
+  // ---- Collectors (real-world discovery) ----
+  listCollectors: () => request<CollectorInfo[]>('/api/collectors'),
+  runCollector: (collector: string, projectId: string) =>
+    request<CollectorRunResponse>('/api/collectors/run', { method: 'POST', body: JSON.stringify({ collector, projectId }) }),
+
+  // ---- API keys ----
+  listApiKeys: () => request<ApiKeyInfo[]>('/api/api-keys'),
+  createApiKey: (name: string) =>
+    request<ApiKeyInfo & { key: string }>('/api/api-keys', { method: 'POST', body: JSON.stringify({ name }) }),
+  revokeApiKey: (id: string) =>
+    request<{ ok: boolean }>(`/api/api-keys/${id}/revoke`, { method: 'POST' }),
 };
 
 // Probe server availability (non-throwing)

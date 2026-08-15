@@ -105,11 +105,8 @@ export function Features() {
     setQBusy(true); setQErr(null);
     try {
       const t0 = performance.now();
-      const res = await getJson<{ columns: string[]; rows: unknown[][]; executionTimeMs: number }>('/api/query', {
-        method: 'POST', body: JSON.stringify({ sql: 'SELECT version() AS duckdb_version' }),
-      });
-      const v = String((res.rows[0]?.[0] ?? '') as string);
-      setQ({ version: v, ms: res.executionTimeMs || Math.round(performance.now() - t0) });
+      const res = await getJson<{ version: string; executionTimeMs: number }>('/api/demo/duckdb-version');
+      setQ({ version: res.version, ms: res.executionTimeMs || Math.round(performance.now() - t0) });
     } catch (e) {
       setQErr(e instanceof Error ? e.message : String(e));
     } finally { setQBusy(false); }

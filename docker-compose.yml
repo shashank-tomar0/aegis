@@ -1,0 +1,23 @@
+# AEGIS — one-command local deployment
+#   docker compose up --build -d
+# Open http://localhost:8787
+
+services:
+  aegis:
+    build: .
+    container_name: aegis
+    ports:
+      - "8787:8787"
+    environment:
+      - AEGIS_HOST=0.0.0.0
+      - AEGIS_PORT=8787
+      - AEGIS_DATA_DIR=/data
+      # Real-world discovery config (optional):
+      # - AEGIS_GITHUB_ORG=your-org
+      # - AEGIS_GITHUB_TOKEN=ghp_xxx
+    volumes:
+      - aegis-data:/data
+    restart: unless-stopped
+
+volumes:
+  aegis-data:

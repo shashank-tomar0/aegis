@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './services/config.js';
 import { registerRoutes } from './routes.js';
 import { createAnalyticsStore } from './db/store.js';
+import { UserStore } from './db/users.js';
 import { generateKeyPair } from './services/pqc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -18,15 +19,28 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 async function main(): Promise<void> {
   const app = Fastify({ logger: config.logger });
 
-  await app.register(cors, { origin: config.corsOrigin });
+  // Reflect request origins (local-first product; tighten via CORS_ORIGIN
+  // allowlist in prod). Credentials must be allowed so session cookies work
+  // even when the UI origin differs from the API origin (vite dev).
+  const allowedOrigins = config.corsOrigin === '*'
+    ? null
+    : config.corsOrigin.split(',').map(s => s.trim()).filter(Boolean);
+  await app.register(cors, {
+    origin: (origin, cb) => {
+      if (!origin || !allowedOrigins) return cb(null, true);
+      cb(null, allowedOrigins.includes(origin) ? origin : false);
+    },
+    credentials: true,
+  });
   await app.register(rateLimit, {
     max: 200,
     timeWindow: '1 minute',
   });
 
-  // Initialize analytics store (DuckDB)
+  // Initialize analytics store (DuckDB) + accounts store (SQLite)
   const store = createAnalyticsStore(config.dataDir);
   await store.initialize();
+  const users = new UserStore(config.dataDir.endsWith('aegis.db') ? config.dataDir : `${config.dataDir}/aegis.db`);
 
   // Warm-up PQC check
   try {
@@ -36,7 +50,7 @@ async function main(): Promise<void> {
     app.log.warn(`[PQC] keygen warm-up failed: ${String(err)}`);
   }
 
-  registerRoutes(app, store);
+  registerRoutes(app, store, users);
 
   // Serve built frontend if present (npm run build first)
   const distPath = join(__dirname, '..', '..', 'dist');

@@ -18,7 +18,8 @@ export class AnalyticsStore {
 
   async initialize(): Promise<void> {
     await mkdir(this.dbPath, { recursive: true });
-    this.instance = await DuckDBInstance.create(':memory:');
+    // Persist to disk so projects/analytics survive restarts
+    this.instance = await DuckDBInstance.create(join(this.dbPath, 'analytics.duckdb'));
     const conn = await this.instance.connect();
     await conn.run(`
       CREATE TABLE IF NOT EXISTS sessions (
@@ -30,26 +31,33 @@ export class AnalyticsStore {
         meta JSON
       )
     `);
+    // (id, session_id) must be the composite key so the same collector node id
+    // can exist in multiple projects. Single-id PK silently hijacked rows to
+    // the first project's session.
+    await conn.run(`DROP TABLE IF EXISTS nodes`);
+    await conn.run(`DROP TABLE IF EXISTS edges`);
     await conn.run(`
-      CREATE TABLE IF NOT EXISTS nodes (
-        id VARCHAR PRIMARY KEY,
+      CREATE TABLE nodes (
+        id VARCHAR,
         session_id VARCHAR,
         kind VARCHAR,
         label VARCHAR,
         metadata JSON,
         risk_score DOUBLE,
         severity INTEGER,
-        created_at BIGINT
+        created_at BIGINT,
+        PRIMARY KEY (id, session_id)
       )
     `);
     await conn.run(`
-      CREATE TABLE IF NOT EXISTS edges (
-        id VARCHAR PRIMARY KEY,
+      CREATE TABLE edges (
+        id VARCHAR,
         session_id VARCHAR,
         source_id VARCHAR,
         target_id VARCHAR,
         kind VARCHAR,
-        weight DOUBLE
+        weight DOUBLE,
+        PRIMARY KEY (id, session_id)
       )
     `);
     await conn.run(`
@@ -174,7 +182,7 @@ export class AnalyticsStore {
         await conn.run(
           `INSERT INTO nodes (id, session_id, kind, label, metadata, risk_score, severity, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (id) DO UPDATE SET label = EXCLUDED.label, risk_score = EXCLUDED.risk_score, severity = EXCLUDED.severity`,
+           ON CONFLICT (id, session_id) DO UPDATE SET label = EXCLUDED.label, risk_score = EXCLUDED.risk_score, severity = EXCLUDED.severity`,
           [String(n.id), sessionId, String(n.kind), String(n.label), JSON.stringify(n.metadata ?? {}), Number(n.riskScore ?? 0), Number(n.severity ?? 0), Date.now()],
         );
       }
@@ -182,7 +190,7 @@ export class AnalyticsStore {
         await conn.run(
           `INSERT INTO edges (id, session_id, source_id, target_id, kind, weight)
            VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (id) DO NOTHING`,
+           ON CONFLICT (id, session_id) DO NOTHING`,
           [String(e.id), sessionId, String(e.source), String(e.target), String(e.kind), Number(e.weight ?? 1)],
         );
       }
@@ -248,13 +256,46 @@ export class AnalyticsStore {
     return this.threats;
   }
 
+  async clearGraph(sessionId: string): Promise<void> {
+    const conn = await this.getConn();
+    try {
+      await conn.run(`DELETE FROM nodes WHERE session_id = ?`, [sessionId]);
+      await conn.run(`DELETE FROM edges WHERE session_id = ?`, [sessionId]);
+    } finally {
+      conn.closeSync();
+    }
+  }
+
+  // ---- Graph counts (lightweight) ----
+  async graphCounts(sessionId: string): Promise<{ nodes: number; edges: number; events: number }> {
+    const conn = await this.getConn();
+    try {
+      const n = (await conn.runAndReadAll(`SELECT COUNT(*) AS c FROM nodes WHERE session_id = ?`, [sessionId])).getRowObjects()[0];
+      const e = (await conn.runAndReadAll(`SELECT COUNT(*) AS c FROM edges WHERE session_id = ?`, [sessionId])).getRowObjects()[0];
+      const ev = (await conn.runAndReadAll(`SELECT COUNT(*) AS c FROM events WHERE session_id = ?`, [sessionId])).getRowObjects()[0];
+      return { nodes: Number(n.c), edges: Number(e.c), events: Number(ev.c) };
+    } finally {
+      conn.closeSync();
+    }
+  }
+
   // ---- Export / persistence ----
   async exportSession(id: string): Promise<{ nodes: any[]; edges: any[]; events: any[] }> {
     const conn = await this.getConn();
+    const safe = (v: unknown): unknown => {
+      if (typeof v === 'bigint') return Number(v);
+      if (v instanceof Uint8Array) return Buffer.from(v).toString('hex');
+      if (v !== null && typeof v === 'object') {
+        try { return JSON.parse(JSON.stringify(v, (_k, val) => typeof val === 'bigint' ? Number(val) : val)); }
+        catch { return String(v); }
+      }
+      return v;
+    };
+    const mapRows = (rows: Record<string, unknown>[]) => rows.map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, safe(v)])));
     try {
-      const nodes = (await conn.runAndReadAll(`SELECT * FROM nodes WHERE session_id = ?`, [id])).getRowObjects();
-      const edges = (await conn.runAndReadAll(`SELECT * FROM edges WHERE session_id = ?`, [id])).getRowObjects();
-      const events = (await conn.runAndReadAll(`SELECT * FROM events WHERE session_id = ?`, [id])).getRowObjects();
+      const nodes = mapRows((await conn.runAndReadAll(`SELECT * FROM nodes WHERE session_id = ?`, [id])).getRowObjects());
+      const edges = mapRows((await conn.runAndReadAll(`SELECT * FROM edges WHERE session_id = ?`, [id])).getRowObjects());
+      const events = mapRows((await conn.runAndReadAll(`SELECT * FROM events WHERE session_id = ?`, [id])).getRowObjects());
       return { nodes, edges, events };
     } finally {
       conn.closeSync();

@@ -32,6 +32,10 @@ export default defineConfig({
   server: {
     port: 5174,
     host: true,
+    watch: {
+      // the server's live DuckDB/SQLite files must not be watched
+      ignored: ['**/data/**'],
+    },
   },
   optimizeDeps: {
     include: ['@duckdb/duckdb-wasm', '@apache-arrow/ts'],
