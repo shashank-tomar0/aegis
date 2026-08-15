@@ -5,15 +5,26 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:server": "tsx watch server/src/index.ts",
+    "server": "tsx server/src/index.ts",
     "build": "tsc -b && vite build",
+    "build:server": "tsc -p server/tsconfig.json",
+    "typecheck:server": "tsc -p server/tsconfig.json",
+    "start": "npm run build && tsx server/src/index.ts",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
     "@apache-arrow/ts": "^21.2.0",
     "@duckdb/duckdb-wasm": "^1.33.1-dev57.0",
+    "@duckdb/node-api": "^1.5.5-r.4",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/static": "^10.1.3",
+    "@noble/post-quantum": "^0.7.0",
     "@tanstack/react-query": "^5.101.4",
     "clsx": "^2.1.1",
+    "fastify": "^5.12.0",
     "framer-motion": "^13.1.0",
     "lucide-react": "^1.31.0",
     "react": "^19.2.8",
@@ -32,6 +43,7 @@
     "oxlint": "^1.75.0",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.12",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"
   }

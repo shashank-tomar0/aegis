@@ -17,6 +17,8 @@ import { AttackSurfaceGraph } from '../engine/graph';
 import { analyticsEngine } from '../engine/analytics';
 import { zkThreatIntel, zkKeyRotation } from '../engine/zkproof';
 import { simRNG } from '../engine/seedrandom';
+import { api, probeServer } from '../lib/api';
+import type { ServerStatus, SessionSnapshot } from '../../shared/types';
 
 interface AppState {
   // Graph
@@ -55,6 +57,13 @@ interface AppState {
   // Threat Intel
   threatIntel: any[];
   isSharingIntel: boolean;
+
+  // Server (full-stack backend)
+  serverStatus: ServerStatus | null;
+  isConnectingServer: boolean;
+  serverSession: SessionSnapshot | null;
+  serverSessions: SessionSnapshot[];
+  isSyncingServer: boolean;
 
   // Actions - Graph
   addNode: (kind: NodeKind, label: string, metadata?: Record<string, unknown>, position?: Position) => NodeId;
@@ -120,6 +129,13 @@ interface AppState {
   shareThreatIntel: (indicators: any[], secret: Uint8Array) => Promise<void>;
   verifyThreatIntel: (intel: any) => boolean;
 
+  // Actions - Server
+  connectServer: () => Promise<void>;
+  refreshSessions: () => Promise<void>;
+  createServerSession: (name?: string) => Promise<SessionSnapshot | null>;
+  syncGraphToServer: () => Promise<boolean>;
+  pushEventToServer: (type: string, source: string, severity?: number, payload?: unknown) => Promise<void>;
+
   // Actions - Persistence
   saveSession: () => Promise<void>;
   loadSession: (sessionData: any) => void;
@@ -158,6 +174,11 @@ export const useStore = create<AppState>()(
         isMigrating: false,
         threatIntel: [],
         isSharingIntel: false,
+        serverStatus: null,
+        isConnectingServer: false,
+        serverSession: null,
+        serverSessions: [],
+        isSyncingServer: false,
 
         // Graph Actions
         addNode: (kind, label, metadata = {}, position) => {
@@ -563,6 +584,79 @@ export const useStore = create<AppState>()(
 
         verifyThreatIntel: (intel) => {
           return zkThreatIntel.verifyIntel(intel);
+        },
+
+        // Server Actions (full-stack backend)
+        connectServer: async () => {
+          set({ isConnectingServer: true });
+          try {
+            const status = await probeServer();
+            set({ serverStatus: status, isConnectingServer: false });
+            if (status.connected) {
+              await get().refreshSessions();
+            }
+          } catch (err) {
+            set({
+              serverStatus: { connected: false, baseUrl: '', error: String(err) },
+              isConnectingServer: false,
+            });
+          }
+        },
+
+        refreshSessions: async () => {
+          try {
+            const sessions = await api.listSessions();
+            set({ serverSessions: sessions });
+          } catch (err) {
+            console.error('[Server] refresh sessions failed:', err);
+          }
+        },
+
+        createServerSession: async (name) => {
+          try {
+            const session = await api.createSession(name);
+            set({ serverSession: session });
+            await get().refreshSessions();
+            return session;
+          } catch (err) {
+            console.error('[Server] create session failed:', err);
+            return null;
+          }
+        },
+
+        syncGraphToServer: async () => {
+          const { serverSession, graph } = get();
+          if (!serverSession) return false;
+          set({ isSyncingServer: true });
+          try {
+            const result = await api.syncGraph(
+              serverSession.id,
+              graph.getAllNodes(),
+              graph.getAllEdges(),
+            );
+            set({ isSyncingServer: false });
+            return result.nodes >= 0;
+          } catch (err) {
+            console.error('[Server] sync failed:', err);
+            set({ isSyncingServer: false });
+            return false;
+          }
+        },
+
+        pushEventToServer: async (type, source, severity = 0, payload = {}) => {
+          const { serverSession } = get();
+          if (!serverSession) return;
+          try {
+            await api.pushEvent({
+              sessionId: serverSession.id,
+              type,
+              source,
+              severity,
+              payload,
+            });
+          } catch (err) {
+            console.error('[Server] push event failed:', err);
+          }
         },
 
         // Persistence Actions

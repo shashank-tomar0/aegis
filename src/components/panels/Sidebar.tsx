@@ -9,8 +9,9 @@ import { AnalyticsPanel } from './AnalyticsPanel';
 import { CryptoPanel } from './CryptoPanel';
 import { ThreatsPanel } from './ThreatsPanel';
 import { EventLogPanel } from './EventLogPanel';
+import { ServerPanel } from './ServerPanel';
 import { SettingsPanel } from './SettingsPanel';
-import { ChevronLeft, ChevronRight, Cpu, Network, Database, Activity, Lock, Shield, Settings, Play, Pause, RotateCcw, Maximize, Minimize, Zap, Download, Terminal } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Cpu, Network, Database, Activity, Lock, Shield, Settings, Play, Pause, RotateCcw, Maximize, Minimize, Zap, Download, Terminal, Server } from 'lucide-react';
 
 const TABS = [
   { id: 'topology', label: 'TOPOLOGY', icon: Network },
@@ -19,6 +20,7 @@ const TABS = [
   { id: 'analytics', label: 'ANALYTICS', icon: Activity },
   { id: 'crypto', label: 'CRYPTO', icon: Lock },
   { id: 'threats', label: 'THREATS', icon: Shield },
+  { id: 'server', label: 'SERVER', icon: Server },
   { id: 'settings', label: 'SETTINGS', icon: Settings },
 ] as const;
 
@@ -55,6 +57,7 @@ export const Sidebar: React.FC = () => {
       case 'analytics': return <AnalyticsPanel />;
       case 'crypto': return <CryptoPanel />;
       case 'threats': return <ThreatsPanel />;
+      case 'server': return <ServerPanel />;
       case 'settings': return <SettingsPanel />;
       default: return <TopologyPanel />;
     }

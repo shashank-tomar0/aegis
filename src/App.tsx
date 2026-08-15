@@ -43,6 +43,8 @@ export const App: React.FC = () => {
     analyticsEngine.initialize().catch(console.error);
     // Seed RNG for reproducibility
     simRNG.setState(2916983006);
+    // Probe full-stack backend
+    useStore.getState().connectServer().catch(console.error);
   }, []);
 
   // Handle keyboard shortcuts

@@ -54,4 +54,13 @@ declare module 'lucide-react' {
   export const FileText: LucideIcon;
   export const Server: LucideIcon;
   export const Settings: LucideIcon;
+  export const PlugZap: LucideIcon;
+  export const Plug: LucideIcon;
+  export const Plug2: LucideIcon;
+  export const KeyRound: LucideIcon;
+  export const PenLine: LucideIcon;
+  export const Send: LucideIcon;
+  export const ShieldCheck: LucideIcon;
+  export const CheckCircle2: LucideIcon;
+  export const Loader2: LucideIcon;
 }
