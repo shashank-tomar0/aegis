@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "bin": {
-    "aegis": "./scripts/aegis.mjs"
+    "aegis": "./scripts/aegis.mjs",
+    "aegis-agents": "./scripts/aegis-agents.mjs"
   },
   "scripts": {
     "dev": "vite",
@@ -14,6 +15,7 @@
     "build:server": "tsc -p server/tsconfig.json",
     "typecheck:server": "tsc -p server/tsconfig.json",
     "start": "npm run build && tsx server/src/index.ts",
+    "agents": "node scripts/aegis-agents.mjs",
     "test": "npm run test:engine && npm run test:server",
     "test:engine": "node --import tsx --test src/engine/graph.test.ts",
     "test:server": "node --test server/test/api.test.mjs",

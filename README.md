@@ -61,6 +61,19 @@ Privacy-preserving threat intel (client-side):
 - GitHub Actions CI: typecheck, build, engine + server tests, lint
 - Installable PWA metadata (manifest + theme)
 
+## The Local Agent Console (TUI)
+
+```bash
+aegis agents          # live terminal console: every process w/ agent detection
+aegis agents --json   # machine-readable snapshot (CI / scripts)
+aegis agents --once   # one-shot table
+```
+
+Keyboard-driven, zero dependencies: detail pane per process (command line, path, parent,
+CPU, memory, threads, handles), sort/filter, kill-with-confirm, JSON export. Recognizes
+agent stacks (ollama, claude, cursor, codex, aider, goose, uvicorn…) and flags secret-like
+arguments. Full design: `docs/AGENTS-PLAN.md`.
+
 ## Quick Start
 
 ```bash

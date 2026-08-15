@@ -200,6 +200,16 @@ async function main() {
       else console.log(r.markdown);
       break;
     }
+    case 'agents': {
+      // hand off to the interactive agent-console TUI
+      const { spawn } = await import('node:child_process');
+      const { dirname, join } = await import('node:path');
+      const { fileURLToPath } = await import('node:url');
+      const here = dirname(fileURLToPath(import.meta.url));
+      const child = spawn(process.execPath, [join(here, 'aegis-agents.mjs'), ...rest], { stdio: 'inherit' });
+      child.on('exit', (code) => process.exit(code ?? 1));
+      return;
+    }
     case 'watch': {
       const projectId = rest[0];
       if (!projectId) throw new Error('usage: aegis watch <projectId>');
