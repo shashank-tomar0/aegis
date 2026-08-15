@@ -9,6 +9,9 @@ import {
   generateKeyPair, signMessage, verifyMessage, encapsulate, decapsulate, issueCertificate, listAlgorithms,
 } from './services/pqc.js';
 import * as telemetry from './services/telemetry.js';
+import { runCollectorForProject } from './services/scanner.js';
+import { getSchedules, setSchedule } from './services/scheduler.js';
+import { subscribe } from './services/alertsHub.js';
 import { getCollector, COLLECTORS } from './collectors/index.js';
 import type {
   SessionSnapshot, CertificateSigningRequest, ThreatIntelRecord,
@@ -344,7 +347,7 @@ export function registerRoutes(app: FastifyInstance, store: AnalyticsStore, user
     const user = requireUser(users, req);
     return COLLECTORS.map(c => {
       const probe = c.probe();
-      const last = users.latestRun(user.id, c.name);
+      const last = users.listRuns(user.id, undefined, c.name, 1)[0] ?? null;
       return {
         name: c.name,
         description: c.description,
@@ -363,61 +366,141 @@ export function registerRoutes(app: FastifyInstance, store: AnalyticsStore, user
     const user = requireUser(users, req);
     const b = req.body ?? ({} as { collector?: string; projectId?: string });
     if (!b.collector || !b.projectId) throw badRequest('collector and projectId required');
-    const def = getCollector(b.collector);
-    if (!def) throw badRequest(`unknown collector: ${b.collector}`);
+    if (!getCollector(b.collector)) throw badRequest(`unknown collector: ${b.collector}`);
     const project = users.getProject(user.id, b.projectId);
     if (!project) throw notFound('project not found');
-    if (running.has(def.name)) throw badRequest(`collector '${def.name}' is already running`);
-
-    running.add(def.name);
-    const started = Date.now();
-    let result;
+    if (running.has(b.collector)) throw badRequest(`collector '${b.collector}' is already running`);
+    running.add(b.collector);
     try {
-      result = await def.run();
-    } catch (err) {
-      result = {
-        name: def.name,
-        source: `collector:${def.name}`,
-        simulated: def.simulated,
-        available: false,
-        note: err instanceof Error ? err.message : String(err),
-        nodes: [], edges: [], log: [`✗ ${String(err)}`],
-      };
+      const outcome = await runCollectorForProject(store, users, project, user, b.collector);
+      return { ...outcome, counts: outcome.counts };
     } finally {
-      running.delete(def.name);
+      running.delete(b.collector);
     }
-    const ms = Date.now() - started;
-
-    users.recordRun({
-      userId: user.id,
-      collector: def.name,
-      found: result.nodes.length + result.edges.length,
-      simulated: result.simulated,
-      error: result.available ? null : (result.note ?? 'unavailable'),
-      ms,
-    });
-
-    let upsert: { nodes: number; edges: number } | null = null;
-    if (result.available) {
-      upsert = await store.upsertGraph(project.sessionId, { nodes: result.nodes, edges: result.edges });
-      users.touchProject(user.id, project.id);
-      telemetry.bump('eventsIngested', result.nodes.length + result.edges.length);
-    }
-
-    return {
-      collector: def.name,
-      simulated: result.simulated,
-      available: result.available,
-      note: result.note,
-      found: result.nodes.length + result.edges.length,
-      upserted: upsert ?? null,
-      ms,
-      counts: await store.graphCounts(project.sessionId),
-      log: result.log,
-    };
   });
 
-  app.delete<{ Params: { id: string } }>('/api/projects/:id/graph', async (req) => {
+  // ---- Monitoring: alerts, scans, diff, schedule, report, live stream ----
+  app.get<{ Params: { id: string } }>('/api/projects/:id/alerts', async (req) => {
+    const user = requireUser(users, req);
+    const p = users.getProject(user.id, req.params.id);
+    if (!p) throw notFound('project not found');
+    return users.listAlerts(user.id, p.id);
+  });
+
+  app.post<{ Params: { id: string } }>('/api/projects/:id/alerts/seen', async (req) => {
+    const user = requireUser(users, req);
+    const p = users.getProject(user.id, req.params.id);
+    if (!p) throw notFound('project not found');
+    users.markAlertsSeen(user.id, p.id);
+    return { ok: true };
+  });
+
+  app.get<{ Params: { id: string } }>('/api/projects/:id/scans', async (req) => {
+    const user = requireUser(users, req);
+    const p = users.getProject(user.id, req.params.id);
+    if (!p) throw notFound('project not found');
+    return users.listRuns(user.id, p.id, undefined, 50).map(r => ({
+      id: r.id, collector: r.collector, ranAt: r.ranAt, found: r.found,
+      simulated: r.simulated === 1, error: r.error, ms: r.ms,
+    }));
+  });
+
+  app.get<{ Params: { id: string } }>('/api/projects/:id/diff', async (req) => {
+    const user = requireUser(users, req);
+    const p = users.getProject(user.id, req.params.id);
+    if (!p) throw notFound('project not found');
+    const runs = users.listRuns(user.id, p.id, undefined, 2);
+    const cur = runs[0];
+    const prev = runs[1];
+    if (!cur) return { hasHistory: false, added: [], removed: [] };
+    const curIds = JSON.parse(cur.nodeIds) as Record<string, string>;
+    const prevIds = prev ? (JSON.parse(prev.nodeIds) as Record<string, string>) : {};
+    const prevSet = new Set(Object.keys(prevIds));
+    const added = Object.entries(curIds).filter(([id]) => !prevSet.has(id)).map(([id, label]) => ({ id, label }));
+    const removed = Object.entries(prevIds).filter(([id]) => !(id in curIds)).map(([id, label]) => ({ id, label }));
+    return { hasHistory: true, fromRunId: prev?.id ?? null, toRunId: cur.id, added, removed };
+  });
+
+  app.get<{ Params: { id: string } }>('/api/projects/:id/schedule', async (req) => {
+    const user = requireUser(users, req);
+    const p = users.getProject(user.id, req.params.id);
+    if (!p) throw notFound('project not found');
+    return { schedules: getSchedules(users, p.id) };
+  });
+
+  app.post<{ Params: { id: string }; Body: { collector?: string; everyMinutes?: number | null } }>('/api/projects/:id/schedule', async (req) => {
+    const user = requireUser(users, req);
+    const p = users.getProject(user.id, req.params.id);
+    if (!p) throw notFound('project not found');
+    const b = req.body ?? ({} as { collector?: string; everyMinutes?: number | null });
+    if (!b.collector) throw badRequest('collector required');
+    if (!getCollector(b.collector)) throw badRequest(`unknown collector: ${b.collector}`);
+    const every = typeof b.everyMinutes === 'number' && b.everyMinutes > 0 ? b.everyMinutes : null;
+    return { schedules: setSchedule(users, p.id, b.collector, every) };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/projects/:id/report', async (req) => {
+    const user = requireUser(users, req);
+    const p = users.getProject(user.id, req.params.id);
+    if (!p) throw notFound('project not found');
+    const { nodes, edges, events } = await store.exportSession(p.sessionId);
+    const kinds: Record<string, number> = {};
+    for (const n of nodes) kinds[n.kind] = (kinds[n.kind] ?? 0) + 1;
+    const riskiest = [...nodes].sort((a, b) => (Number(b.risk_score) || 0) - (Number(a.risk_score) || 0)).slice(0, 5);
+    const alerts = users.listAlerts(user.id, p.id, 10);
+    const lines = [
+      `# AEGIS Scan Report — ${p.name}`,
+      '',
+      `Generated: ${new Date().toISOString()} · Project: ${p.id}`,
+      '',
+      '## Inventory',
+      ...Object.entries(kinds).map(([k, c]) => `- ${k}: ${c}`),
+      `- edges: ${edges.length}`,
+      `- events: ${events.length}`,
+      '',
+      '## Highest-risk assets',
+      ...riskiest.map(n => `- ${n.label} (${n.kind}): risk ${Number(n.risk_score).toFixed(2)}, severity ${n.severity}`),
+      '',
+      '## Recent alerts',
+      ...(alerts.length ? alerts.map(a => `- [${a.severity.toUpperCase()}] ${a.title} (${new Date(a.createdAt).toISOString()})`) : ['- none']),
+      '',
+    ];
+    const markdown = lines.join('\n');
+    return { markdown, summary: { nodes: nodes.length, edges: edges.length, kinds, riskiest, alerts: alerts.length } };
+  });
+
+  app.get<{ Params: { id: string } }>('/api/projects/:id/stream', async (req, reply) => {
+    const user = requireUser(users, req);
+    const p = users.getProject(user.id, req.params.id);
+    if (!p) throw notFound('project not found');
+    reply.hijack();
+    const origin = req.headers.origin;
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      ...(origin ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
+    });
+    const initial = users.listAlerts(user.id, p.id, 20);
+    reply.raw.write(`event: snapshot
+data: ${JSON.stringify(initial)}
+
+`);
+    const unsub = subscribe(user.id, (a) => {
+      if (a.projectId !== p.id || reply.raw.destroyed) return;
+      reply.raw.write(`event: alert
+data: ${JSON.stringify(a)}
+
+`);
+    });
+    const hb = setInterval(() => { if (!reply.raw.destroyed) reply.raw.write(`: hb
+
+`); }, 15_000);
+    req.raw.on('close', () => { clearInterval(hb); unsub(); });
+  });
+
+app.delete<{ Params: { id: string } }>('/api/projects/:id/graph', async (req) => {
     const user = requireUser(users, req);
     const p = users.getProject(user.id, req.params.id);
     if (!p) throw notFound('project not found');

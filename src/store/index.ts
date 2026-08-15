@@ -19,6 +19,7 @@ import { zkThreatIntel, zkKeyRotation } from '../engine/zkproof';
 import { simRNG } from '../engine/seedrandom';
 import { api, probeServer } from '../lib/api';
 import type { ServerStatus, SessionSnapshot, ProjectInfo, ApiKeyInfo, CollectorInfo } from '../../shared/types';
+import type { AlertInfo, ScanInfo, DiffResult, ScheduleEntry } from '../lib/api';
 
 interface AppState {
   // Graph
@@ -75,6 +76,13 @@ interface AppState {
   collectors: CollectorInfo[];
   collectorLog: string[];
   discoveryBusy: boolean;
+
+  // Monitoring: alerts, scan history, diffs, schedules
+  alerts: AlertInfo[];
+  scans: ScanInfo[];
+  diff: DiffResult | null;
+  schedules: ScheduleEntry[];
+  monitoringBusy: boolean;
 
   // Actions - Graph
   addNode: (kind: NodeKind, label: string, metadata?: Record<string, unknown>, position?: Position) => NodeId;
@@ -166,6 +174,15 @@ interface AppState {
   appendCollectorLog: (line: string) => void;
   clearCollectorLog: () => void;
 
+  // Actions - Monitoring
+  refreshAlerts: () => Promise<void>;
+  markAlertsSeen: () => Promise<void>;
+  refreshScans: () => Promise<void>;
+  refreshDiff: () => Promise<void>;
+  refreshSchedule: () => Promise<void>;
+  setProjectSchedule: (collector: string, everyMinutes: number | null) => Promise<void>;
+  pushLiveAlert: (a: AlertInfo) => void;
+
   // Actions - Persistence
   saveSession: () => Promise<void>;
   loadSession: (sessionData: any) => void;
@@ -220,6 +237,11 @@ export const useStore = create<AppState>()(
         collectors: [],
         collectorLog: [],
         discoveryBusy: false,
+        alerts: [],
+        scans: [],
+        diff: null,
+        schedules: [],
+        monitoringBusy: false,
 
         // Graph Actions
         addNode: (kind, label, metadata = {}, position) => {
@@ -840,6 +862,48 @@ export const useStore = create<AppState>()(
         },
         appendCollectorLog: (line) => set(s => ({ collectorLog: [...s.collectorLog.slice(-60), line] })),
         clearCollectorLog: () => set({ collectorLog: [] }),
+
+        // ---- Monitoring ----
+        refreshAlerts: async () => {
+          const projectId = get().currentProjectId;
+          if (!projectId) return;
+          try { set({ alerts: await api.getAlerts(projectId) }); } catch { /* ignore */ }
+        },
+        markAlertsSeen: async () => {
+          const projectId = get().currentProjectId;
+          if (!projectId) return;
+          try {
+            await api.markAlertsSeen(projectId);
+            set(s => ({ alerts: s.alerts.map(a => ({ ...a, seen: 1 })) }));
+          } catch { /* ignore */ }
+        },
+        refreshScans: async () => {
+          const projectId = get().currentProjectId;
+          if (!projectId) return;
+          try { set({ scans: await api.getScans(projectId) }); } catch { /* ignore */ }
+        },
+        refreshDiff: async () => {
+          const projectId = get().currentProjectId;
+          if (!projectId) return;
+          try { set({ diff: await api.getDiff(projectId) }); } catch { /* ignore */ }
+        },
+        refreshSchedule: async () => {
+          const projectId = get().currentProjectId;
+          if (!projectId) return;
+          try { set({ schedules: (await api.getSchedule(projectId)).schedules }); } catch { /* ignore */ }
+        },
+        setProjectSchedule: async (collector, everyMinutes) => {
+          const projectId = get().currentProjectId;
+          if (!projectId) return;
+          set({ monitoringBusy: true });
+          try {
+            const r = await api.setSchedule(projectId, collector, everyMinutes);
+            set({ schedules: r.schedules, monitoringBusy: false });
+          } catch (err) {
+            set({ monitoringBusy: false, authError: err instanceof Error ? err.message : String(err) });
+          }
+        },
+        pushLiveAlert: (a) => set(s => ({ alerts: [a, ...s.alerts.filter(x => x.id !== a.id)].slice(0, 100) })),
 
         // Persistence Actions
         saveSession: async () => {

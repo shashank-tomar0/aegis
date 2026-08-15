@@ -55,6 +55,11 @@ async function main() {
     console.log(`  aegis scan <collector> --project <id>`);
     console.log(`  aegis keys | key-create <name> | key-revoke <id>`);
     console.log(`  aegis export <projectId> [--out file.json]`);
+    console.log(`  aegis alerts <projectId> [--seen]`);
+    console.log(`  aegis diff <projectId>`);
+    console.log(`  aegis schedule <projectId> <collector> <minutes|off>`);
+    console.log(`  aegis report <projectId> [--out report.md]`);
+    console.log(`  aegis watch <projectId>`);
     return;
   }
 
@@ -153,6 +158,62 @@ async function main() {
         console.log(payload);
       }
       break;
+    }
+    case 'alerts': {
+      const projectId = rest[0];
+      if (!projectId) throw new Error('usage: aegis alerts <projectId>');
+      const alerts = await api(cfg, 'GET', `/api/projects/${projectId}/alerts`);
+      if (!alerts.length) { console.log('no alerts for this project'); break; }
+      for (const a of alerts) {
+        console.log(`${a.seen ? ' ' : '●'} [${a.severity.toUpperCase().padEnd(8)}] ${a.title}  ${new Date(a.createdAt).toLocaleString()}`);
+      }
+      break;
+    }
+    case 'diff': {
+      const projectId = rest[0];
+      if (!projectId) throw new Error('usage: aegis diff <projectId>');
+      const d = await api(cfg, 'GET', `/api/projects/${projectId}/diff`);
+      if (!d.hasHistory) { console.log('no scan history yet'); break; }
+      console.log(`+ added: ${d.added.length}`);
+      for (const a of d.added.slice(0, 20)) console.log(`   + ${a.label} (${a.id})`);
+      console.log(`- removed: ${d.removed.length}`);
+      for (const r of d.removed.slice(0, 20)) console.log(`   - ${r.label} (${r.id})`);
+      break;
+    }
+    case 'schedule': {
+      const [projectId, collector, minutesOrOff] = rest;
+      if (!projectId || !collector || !minutesOrOff) throw new Error('usage: aegis schedule <projectId> <collector> <minutes|off>');
+      const everyMinutes = minutesOrOff === 'off' ? null : Number(minutesOrOff);
+      const r = await api(cfg, 'POST', `/api/projects/${projectId}/schedule`, { collector, everyMinutes });
+      console.log(`schedules: ${r.schedules.length ? r.schedules.map(s => `${s.collector}@${s.everyMinutes}m`).join(', ') : 'none'}`);
+      break;
+    }
+    case 'report': {
+      const projectId = rest[0];
+      if (!projectId) throw new Error('usage: aegis report <projectId> [--out report.md]');
+      const outIdx = rest.indexOf('--out');
+      const out = outIdx >= 0 ? rest[outIdx + 1] : null;
+      const r = await api(cfg, 'POST', `/api/projects/${projectId}/report`, {});
+      const s = r.summary;
+      console.log(`REPORT: ${JSON.stringify(s)}`);
+      if (out) { writeFileSync(out, r.markdown); console.log(`✓ written to ${out}`); }
+      else console.log(r.markdown);
+      break;
+    }
+    case 'watch': {
+      const projectId = rest[0];
+      if (!projectId) throw new Error('usage: aegis watch <projectId>');
+      console.log(`watching ${projectId} for new alerts (ctrl+c to stop)`);
+      let seen = new Set();
+      for (;;) {
+        const alerts = await api(cfg, 'GET', `/api/projects/${projectId}/alerts`);
+        for (const a of alerts) {
+          if (seen.has(a.id)) continue;
+          seen.add(a.id);
+          console.log(`● [${a.severity.toUpperCase()}] ${a.title} — ${a.detail}`);
+        }
+        await new Promise(r => setTimeout(r, 5000));
+      }
     }
     default:
       throw new Error(`unknown command: ${cmd} — run 'aegis --help'`);

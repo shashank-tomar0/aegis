@@ -50,6 +50,17 @@ Privacy-preserving threat intel (client-side):
 - Panels: **Topology**, **Node Details**, **Event Log**, **Analytics**, **Crypto**, **Threats**, **Server** (connection status, sessions, PQC playground, remote DuckDB query), **Settings**
 - Routing: `/` landing, `/console` app (lazy-loaded) — hash-free via History API
 
+### Continuous Monitoring
+- Scheduled scans per project (server scheduler, 30s tick) with per-collector intervals
+- Run-to-run **change detection** (added/removed assets) and a **rule-based alert engine** (new critical data sources, gateways, high-risk assets)
+- Live per-project alert feed over **SSE** in the console's MONITOR panel; `aegis watch` in the CLI
+- **Reports**: real DuckDB-queried markdown summary per project (`aegis report`)
+
+### Quality
+- Engine unit tests (node:test) + server integration suite covering auth → project → collector → alerts → diff → schedule → API-key auth
+- GitHub Actions CI: typecheck, build, engine + server tests, lint
+- Installable PWA metadata (manifest + theme)
+
 ## Quick Start
 
 ```bash

@@ -119,7 +119,24 @@ export const api = {
     request<ApiKeyInfo & { key: string }>('/api/api-keys', { method: 'POST', body: JSON.stringify({ name }) }),
   revokeApiKey: (id: string) =>
     request<{ ok: boolean }>(`/api/api-keys/${id}/revoke`, { method: 'POST' }),
+
+  // ---- Monitoring: alerts, scans, diff, schedules ----
+  getAlerts: (projectId: string) => request<AlertInfo[]>(`/api/projects/${projectId}/alerts`),
+  markAlertsSeen: (projectId: string) =>
+    request<{ ok: boolean }>(`/api/projects/${projectId}/alerts/seen`, { method: 'POST' }),
+  getScans: (projectId: string) => request<ScanInfo[]>(`/api/projects/${projectId}/scans`),
+  getDiff: (projectId: string) =>
+    request<DiffResult>(`/api/projects/${projectId}/diff`),
+  getSchedule: (projectId: string) =>
+    request<{ schedules: ScheduleEntry[] }>(`/api/projects/${projectId}/schedule`),
+  setSchedule: (projectId: string, collector: string, everyMinutes: number | null) =>
+    request<{ schedules: ScheduleEntry[] }>(`/api/projects/${projectId}/schedule`, { method: 'POST', body: JSON.stringify({ collector, everyMinutes }) }),
 };
+
+export interface AlertInfo { id: string; severity: string; title: string; detail: string; createdAt: number; seen: number; }
+export interface ScanInfo { id: string; collector: string; ranAt: number; found: number; simulated: number; error: string | null; ms: number; }
+export interface DiffResult { hasHistory: boolean; fromRunId?: string | null; toRunId?: string | null; added: Array<{ id: string; label: string }>; removed: Array<{ id: string; label: string }>; }
+export interface ScheduleEntry { collector: string; everyMinutes: number; }
 
 // Probe server availability (non-throwing)
 export async function probeServer(): Promise<ServerStatus> {

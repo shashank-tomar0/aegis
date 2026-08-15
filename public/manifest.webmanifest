@@ -1,0 +1,23 @@
+{
+  "name": "AEGIS — Attack Surface Intelligence",
+  "short_name": "AEGIS",
+  "description": "Map the attack surface of agentic AI — blast radius, centrality, and post-quantum crypto agility.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

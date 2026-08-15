@@ -17,8 +17,14 @@ export interface ProjectRow {
 }
 export interface SessionRow { tokenHash: string; userId: string; createdAt: number; expiresAt: number; }
 export interface CollectorRunRow {
-  id: string; userId: string; collector: string; ranAt: number; found: number;
+  id: string; userId: string; projectId: string; collector: string; ranAt: number; found: number;
   simulated: number; error: string | null; ms: number;
+  nodeIds: string; edgeIds: string;
+}
+
+export interface AlertRow {
+  id: string; userId: string; projectId: string; severity: 'critical' | 'high' | 'medium' | 'low';
+  title: string; detail: string; createdAt: number; seen: number;
 }
 
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000; // 30 days
@@ -89,15 +95,38 @@ export class UserStore {
       CREATE TABLE IF NOT EXISTS collector_runs (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
+        project_id TEXT NOT NULL DEFAULT '',
         collector TEXT NOT NULL,
         ran_at INTEGER NOT NULL,
         found INTEGER NOT NULL DEFAULT 0,
         simulated INTEGER NOT NULL DEFAULT 0,
         error TEXT,
-        ms INTEGER NOT NULL DEFAULT 0
+        ms INTEGER NOT NULL DEFAULT 0,
+        node_ids TEXT NOT NULL DEFAULT '{}',
+        edge_ids TEXT NOT NULL DEFAULT '{}'
       );
       CREATE INDEX IF NOT EXISTS idx_runs_user ON collector_runs(user_id, ran_at);
+      CREATE TABLE IF NOT EXISTS alerts (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        title TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        seen INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_alerts_project ON alerts(project_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_alerts_user ON alerts(user_id, seen);
     `);
+    // migration for pre-monitoring databases (must run BEFORE indexes that
+    // reference the new columns)
+    const cols = this.db.prepare(`PRAGMA table_info(collector_runs)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map(c => c.name));
+    if (!names.has('project_id')) this.db.exec(`ALTER TABLE collector_runs ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`);
+    if (!names.has('node_ids')) this.db.exec(`ALTER TABLE collector_runs ADD COLUMN node_ids TEXT NOT NULL DEFAULT '{}'`);
+    if (!names.has('edge_ids')) this.db.exec(`ALTER TABLE collector_runs ADD COLUMN edge_ids TEXT NOT NULL DEFAULT '{}'`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_runs_project ON collector_runs(project_id, collector, ran_at)`);
   }
 
   close(): void { this.db.close(); }
@@ -238,30 +267,101 @@ export class UserStore {
     return res.changes > 0;
   }
 
-  // ---- Collector runs ----
-  recordRun(run: { userId: string; collector: string; found: number; simulated: boolean; error: string | null; ms: number }): void {
-    this.db.prepare(
-      `INSERT INTO collector_runs (id, user_id, collector, ran_at, found, simulated, error, ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(randomUUID(), run.userId, run.collector, Date.now(), run.found, run.simulated ? 1 : 0, run.error, run.ms);
-  }
-
-  listRuns(userId: string, collector?: string, limit = 20): CollectorRunRow[] {
-    const rows = collector
-      ? this.db.prepare(
-          `SELECT id, user_id, collector, ran_at, found, simulated, error, ms FROM collector_runs WHERE user_id = ? AND collector = ? ORDER BY ran_at DESC LIMIT ?`,
-        ).all(userId, collector, limit)
-      : this.db.prepare(
-          `SELECT id, user_id, collector, ran_at, found, simulated, error, ms FROM collector_runs WHERE user_id = ? ORDER BY ran_at DESC LIMIT ?`,
-        ).all(userId, limit);
-    return (rows as Record<string, unknown>[]).map(r => ({
-      id: String(r.id), userId: String(r.user_id), collector: String(r.collector),
-      ranAt: Number(r.ran_at), found: Number(r.found), simulated: Number(r.simulated),
-      error: r.error == null ? null : String(r.error), ms: Number(r.ms),
+  /** All projects across users (single-tenant scheduler). */
+  listAllProjects(): Array<{ project: ProjectRow; owner: UserRow }> {
+    const rows = this.db.prepare(
+      `SELECT p.id AS pid, p.owner_id, p.name, p.session_id, p.created_at, p.updated_at, p.meta,
+              u.email FROM projects p JOIN users u ON u.id = p.owner_id ORDER BY p.updated_at DESC LIMIT 500`,
+    ).all() as Record<string, unknown>[];
+    return rows.map(r => ({
+      project: {
+        id: String(r.pid), ownerId: String(r.owner_id), name: String(r.name),
+        sessionId: String(r.session_id), createdAt: Number(r.created_at),
+        updatedAt: Number(r.updated_at), meta: String(r.meta ?? '{}'),
+      },
+      owner: { id: String(r.owner_id), email: String(r.email), passHash: '', createdAt: 0 },
     }));
   }
 
-  latestRun(userId: string, collector: string): CollectorRunRow | null {
-    const rows = this.listRuns(userId, collector, 1);
+  getProjectMeta(projectId: string): Record<string, unknown> {
+    const row = this.db.prepare(`SELECT meta FROM projects WHERE id = ?`).get(projectId) as Record<string, unknown> | undefined;
+    try { return JSON.parse(String(row?.meta ?? '{}')); } catch { return {}; }
+  }
+
+  saveProjectMeta(projectId: string, meta: Record<string, unknown>): void {
+    this.db.prepare(`UPDATE projects SET meta = ? WHERE id = ?`).run(JSON.stringify(meta), projectId);
+  }
+
+  latestRunByProjectAny(projectId: string, collector: string): CollectorRunRow | null {
+    const rows = this.db.prepare(
+      `SELECT id, user_id, project_id, collector, ran_at, found, simulated, error, ms, node_ids, edge_ids
+       FROM collector_runs WHERE project_id = ? AND collector = ? ORDER BY ran_at DESC LIMIT 1`,
+    ).all(projectId, collector);
+    return (rows[0] ? {
+      id: String(rows[0].id), userId: String(rows[0].user_id), projectId: String(rows[0].project_id),
+      collector: String(rows[0].collector), ranAt: Number(rows[0].ran_at), found: Number(rows[0].found),
+      simulated: Number(rows[0].simulated), error: rows[0].error == null ? null : String(rows[0].error),
+      ms: Number(rows[0].ms), nodeIds: String(rows[0].node_ids ?? '{}'), edgeIds: String(rows[0].edge_ids ?? '{}'),
+    } : null);
+  }
+
+  // ---- Collector runs ----
+  recordRun(run: {
+    userId: string; projectId: string; collector: string; found: number;
+    simulated: boolean; error: string | null; ms: number; nodeIds: Record<string, string>; edgeIds: Record<string, string>;
+  }): void {
+    this.db.prepare(
+      `INSERT INTO collector_runs (id, user_id, project_id, collector, ran_at, found, simulated, error, ms, node_ids, edge_ids)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(randomUUID(), run.userId, run.projectId, run.collector, Date.now(), run.found,
+      run.simulated ? 1 : 0, run.error, run.ms, JSON.stringify(run.nodeIds), JSON.stringify(run.edgeIds));
+  }
+
+  listRuns(userId: string, projectId?: string, collector?: string, limit = 20): CollectorRunRow[] {
+    const where: string[] = ['user_id = ?'];
+    const args: (string | number)[] = [userId];
+    if (projectId) { where.push('project_id = ?'); args.push(projectId); }
+    if (collector) { where.push('collector = ?'); args.push(collector); }
+    args.push(limit);
+    const rows = this.db.prepare(
+      `SELECT id, user_id, project_id, collector, ran_at, found, simulated, error, ms, node_ids, edge_ids
+       FROM collector_runs WHERE ${where.join(' AND ')} ORDER BY ran_at DESC LIMIT ?`,
+    ).all(...args);
+    return (rows as Record<string, unknown>[]).map(r => ({
+      id: String(r.id), userId: String(r.user_id), projectId: String(r.project_id), collector: String(r.collector),
+      ranAt: Number(r.ran_at), found: Number(r.found), simulated: Number(r.simulated),
+      error: r.error == null ? null : String(r.error), ms: Number(r.ms),
+      nodeIds: String(r.node_ids ?? '{}'), edgeIds: String(r.edge_ids ?? '{}'),
+    }));
+  }
+
+  latestRunByProject(userId: string, projectId: string, collector: string): CollectorRunRow | null {
+    const rows = this.listRuns(userId, projectId, collector, 1);
     return rows[0] ?? null;
+  }
+
+  // ---- Alerts ----
+  insertAlert(a: { userId: string; projectId: string; severity: AlertRow['severity']; title: string; detail: string }): AlertRow {
+    const id = randomUUID();
+    this.db.prepare(
+      `INSERT INTO alerts (id, user_id, project_id, severity, title, detail, created_at, seen) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+    ).run(id, a.userId, a.projectId, a.severity, a.title, a.detail, Date.now());
+    return { id, userId: a.userId, projectId: a.projectId, severity: a.severity, title: a.title, detail: a.detail, createdAt: Date.now(), seen: 0 };
+  }
+
+  listAlerts(userId: string, projectId: string, limit = 100): AlertRow[] {
+    const rows = this.db.prepare(
+      `SELECT id, user_id, project_id, severity, title, detail, created_at, seen FROM alerts
+       WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ?`,
+    ).all(userId, projectId, limit) as Record<string, unknown>[];
+    return rows.map(r => ({
+      id: String(r.id), userId: String(r.user_id), projectId: String(r.project_id),
+      severity: String(r.severity) as AlertRow['severity'], title: String(r.title), detail: String(r.detail),
+      createdAt: Number(r.created_at), seen: Number(r.seen),
+    }));
+  }
+
+  markAlertsSeen(userId: string, projectId: string): void {
+    this.db.prepare(`UPDATE alerts SET seen = 1 WHERE user_id = ? AND project_id = ?`).run(userId, projectId);
   }
 }

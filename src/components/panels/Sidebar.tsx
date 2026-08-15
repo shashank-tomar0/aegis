@@ -12,6 +12,7 @@ import { EventLogPanel } from './EventLogPanel';
 import { ServerPanel } from './ServerPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { DiscoverPanel } from './DiscoverPanel';
+import { MonitorPanel } from './MonitorPanel';
 import { ChevronLeft, ChevronRight, Cpu, Network, Database, Activity, Lock, Shield, Settings, Play, Pause, RotateCcw, Maximize, Minimize, Zap, Download, Terminal, Server, Search } from 'lucide-react';
 
 const TABS = [
@@ -23,6 +24,7 @@ const TABS = [
   { id: 'threats', label: 'THREATS', icon: Shield },
   { id: 'server', label: 'SERVER', icon: Server },
   { id: 'discover', label: 'DISCOVER', icon: Search },
+  { id: 'monitor', label: 'MONITOR', icon: Zap },
   { id: 'settings', label: 'SETTINGS', icon: Settings },
 ] as const;
 
@@ -64,6 +66,7 @@ export const Sidebar: React.FC = () => {
       case 'threats': return <ThreatsPanel />;
       case 'server': return <ServerPanel />;
       case 'discover': return <DiscoverPanel />;
+      case 'monitor': return <MonitorPanel />;
       case 'settings': return <SettingsPanel />;
       default: return <TopologyPanel />;
     }

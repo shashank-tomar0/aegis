@@ -13,6 +13,7 @@ import { registerRoutes } from './routes.js';
 import { createAnalyticsStore } from './db/store.js';
 import { UserStore } from './db/users.js';
 import { generateKeyPair } from './services/pqc.js';
+import { startScheduler } from './services/scheduler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -51,6 +52,12 @@ async function main(): Promise<void> {
   }
 
   registerRoutes(app, store, users);
+
+  // Continuous monitoring scheduler (disable with AEGIS_SCHEDULER=off)
+  if (process.env.AEGIS_SCHEDULER !== 'off') {
+    startScheduler(store, users, (msg) => app.log.info(msg));
+    app.log.info('[AEGIS] scan scheduler running (tick 30s)');
+  }
 
   // Serve built frontend if present (npm run build first)
   const distPath = join(__dirname, '..', '..', 'dist');

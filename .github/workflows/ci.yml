@@ -1,0 +1,27 @@
+# AEGIS CI — typecheck, build, tests, lint
+name: ci
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Typecheck (frontend)
+        run: npm run build -- --outDir dist-ci
+      - name: Typecheck (server)
+        run: npx tsc -p server/tsconfig.json
+      - name: Engine tests
+        run: npm run test:engine
+      - name: Server integration tests
+        run: npm run test:server
+      - name: Lint
+        run: npm run lint
